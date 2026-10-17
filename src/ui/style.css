@@ -1,0 +1,791 @@
+:root {
+  --bg: #0e1113;
+  --panel: #161a1d;
+  --panel-2: #1d2226;
+  --ink: #edf0f2;
+  --muted: #9aa3aa;
+  --line: #2b3237;
+  --accent: #2fd4ff;
+  --good: #6fcf97;
+  --warn: #f2b65a;
+  --bad: #f2786a;
+  --code: #10141a;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f3f5f6;
+    --panel: #ffffff;
+    --panel-2: #eef1f3;
+    --ink: #172026;
+    --muted: #5d6870;
+    --line: #d7dde1;
+    --accent: #007a99;
+    --good: #1e8a4c;
+    --warn: #a86400;
+    --bad: #c23b2b;
+    --code: #f6f8f9;
+    color-scheme: light;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    15px/1.45 system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  gap: 24px;
+  padding: 24px;
+  min-height: 100vh;
+}
+
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+}
+
+code,
+pre {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+}
+
+button,
+select,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button,
+select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* ---------- The device ---------- */
+
+.stage {
+  min-width: 0;
+}
+
+.stage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 26px;
+  color: var(--muted);
+}
+
+.stage-bar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.surface {
+  font-size: 13px;
+}
+
+.device {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 22px;
+  background: #050606;
+  box-shadow:
+    0 0 0 14px #1d1f1f,
+    0 0 0 15px #2c2f2f,
+    0 30px 80px rgb(0 0 0 / 0.45);
+}
+
+.screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  overflow: hidden;
+  background: #0b0f12;
+  color: #f3f6f8;
+}
+
+.idle {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 12px;
+  padding: 0 48px;
+  background: radial-gradient(ellipse at 30% 20%, #18303a, #0b0f12 70%);
+}
+
+.idle-clock {
+  font-size: 140px;
+  font-weight: 300;
+  letter-spacing: -2px;
+}
+
+.idle-hint {
+  font-size: 30px;
+  color: #a9b5bc;
+}
+
+.app-host,
+.app-host iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 80px 56px 44px;
+  background: linear-gradient(transparent, rgb(5 8 10 / 0.92) 45%);
+  pointer-events: none;
+}
+
+.caption p {
+  margin: 0;
+}
+
+.heard {
+  font-size: 26px;
+  color: #b9c4ca;
+}
+
+.said {
+  margin-top: 8px !important;
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #fff;
+}
+
+/* The light bar along the bottom edge: steady while listening, moving while thinking, glowing while speaking. */
+.lightbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 10px;
+  opacity: 0;
+  transition: opacity 0.25s;
+  background: #2fd4ff;
+}
+
+.lightbar[data-state="listening"] {
+  opacity: 1;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.lightbar[data-state="thinking"] {
+  opacity: 1;
+  background: linear-gradient(90deg, #0a3b4a, #2fd4ff, #0a3b4a);
+  background-size: 50% 100%;
+  animation: sweep 1s linear infinite;
+}
+
+.lightbar[data-state="speaking"] {
+  opacity: 1;
+  box-shadow: 0 0 24px #2fd4ff;
+  animation: pulse 0.7s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    filter: brightness(0.55);
+  }
+}
+
+@keyframes sweep {
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lightbar {
+    animation: none !important;
+  }
+}
+
+.device-note {
+  margin: 28px 4px 0;
+  color: var(--muted);
+}
+
+/* ---------- An Echo Dot: no screen, only the light ring, with what was heard and said under it ---------- */
+
+.dot .device {
+  width: min(360px, 70%);
+  height: auto !important;
+  aspect-ratio: 1;
+  margin: 40px auto 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 38%, #3a3f3f, #1a1d1d 62%, #0f1111);
+  box-shadow:
+    0 0 0 10px #151717,
+    0 34px 80px rgb(0 0 0 / 0.5);
+}
+
+.dot .screen {
+  display: none;
+}
+
+/* Its four buttons: volume down and up, the action button and the microphone. */
+.dot .device::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 24%, #4d5353 0 4.2%, transparent 4.6%),
+    radial-gradient(circle at 50% 76%, #4d5353 0 4.2%, transparent 4.6%),
+    radial-gradient(circle at 24% 50%, #4d5353 0 4.2%, transparent 4.6%),
+    radial-gradient(circle at 76% 50%, #4d5353 0 4.2%, transparent 4.6%);
+}
+
+.dot .lightbar,
+.dot .lightbar[data-state] {
+  inset: 0;
+  height: auto;
+  border-radius: 50%;
+  background: none;
+  border: 16px solid #2fd4ff;
+}
+
+.dot .lightbar[data-state="thinking"] {
+  border-color: #2fd4ff #0a3b4a #0a3b4a #0a3b4a;
+  animation: spin 0.9s linear infinite;
+}
+
+.dot .lightbar[data-state="speaking"] {
+  box-shadow: 0 0 36px #2fd4ff;
+}
+
+.dot .caption {
+  position: static;
+  max-width: 760px;
+  margin: 28px auto 0;
+  padding: 0 4px;
+  background: none;
+  text-align: center;
+}
+
+.dot .heard {
+  font-size: 20px;
+  color: var(--muted);
+}
+
+.dot .said {
+  font-size: 28px;
+  color: var(--ink);
+}
+
+.dot .device-note {
+  text-align: center;
+}
+
+/* ---------- The panel ---------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+h2 {
+  margin: 16px 0 6px;
+  font-size: 15px;
+}
+
+.lede {
+  margin: 0;
+  color: var(--muted);
+}
+
+.lede code {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.status {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: 14px;
+}
+
+.status[data-tone="bad"] {
+  color: var(--bad);
+}
+
+.talk {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.mic {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border-color: transparent;
+  background: var(--accent);
+  color: #001a22;
+  font-weight: 600;
+}
+
+.mic svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.mic[aria-pressed="true"] {
+  box-shadow: 0 0 0 4px rgb(47 212 255 / 0.3);
+}
+
+.ask {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ask input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--warn);
+  font-size: 14px;
+}
+
+.note:empty {
+  display: none;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chips:empty {
+  display: none;
+}
+
+.chips button {
+  border-radius: 999px;
+  padding: 6px 12px;
+  text-align: left;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 8px 10px;
+  color: var(--muted);
+}
+
+.tabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.count[data-tone="bad"] {
+  color: var(--bad);
+}
+
+.tab-panel {
+  min-height: 160px;
+}
+
+.hint {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.hint:empty {
+  display: none;
+}
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 52vh;
+  overflow: auto;
+  font-size: 14px;
+}
+
+.log > li {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 2px 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.log .when {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+
+.log .who {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  padding-top: 2px;
+}
+
+.log .who[data-who="screen"] {
+  color: var(--good);
+}
+
+.log .who[data-who="you"] {
+  color: var(--ink);
+}
+
+.log .who[data-who="error"] {
+  color: var(--bad);
+}
+
+.log .what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.log .meta {
+  grid-column: 3;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.log li.bad .what,
+.log .slow {
+  color: var(--bad);
+}
+
+.log details {
+  grid-column: 1 / -1;
+}
+
+.log summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.result {
+  margin: 8px 0 0;
+  padding: 10px;
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 8px 10px;
+  color: var(--ink);
+}
+
+.field textarea {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.tool-about {
+  margin: -4px 0 10px;
+  font-size: 14px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+
+.badge[data-tone="good"] {
+  border-color: var(--good);
+  color: var(--good);
+}
+
+.badge[data-tone="warn"] {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.badge[data-tone="bad"] {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* ---------- The readiness report ---------- */
+
+.verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  margin: 14px 0 6px;
+}
+
+.verdict strong {
+  font-size: 20px;
+}
+
+.verdict[data-verdict="READY"] strong {
+  color: var(--good);
+}
+
+.verdict[data-verdict="CONDITIONAL"] strong {
+  color: var(--warn);
+}
+
+.verdict[data-verdict="NOT_READY"] strong {
+  color: var(--bad);
+}
+
+.rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rules li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rules .status-chip {
+  display: inline-block;
+  min-width: 44px;
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-chip[data-status="PASS"] {
+  color: var(--good);
+}
+
+.status-chip[data-status="WARN"] {
+  color: var(--warn);
+}
+
+.status-chip[data-status="FAIL"] {
+  color: var(--bad);
+}
+
+.status-chip[data-status="SKIP"] {
+  color: var(--muted);
+}
+
+.rules .rule-id {
+  color: var(--muted);
+  font-size: 12px;
+  margin-right: 6px;
+}
+
+.rules p {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.rules blockquote {
+  margin: 6px 0 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.disclaimer {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- The server ---------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tool-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tool-list li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tool-list p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+}
