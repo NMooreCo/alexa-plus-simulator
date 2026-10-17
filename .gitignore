@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.*
+readiness-report.json
+inspection-summary.json
+*.log

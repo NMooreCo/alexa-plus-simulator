@@ -1,0 +1,51 @@
+{
+  "name": "alexa-plus-simulator",
+  "version": "0.1.0",
+  "description": "An open, unofficial simulator and readiness check for Alexa+ MCP add-ons: point it at your MCP server, talk to it on a simulated Echo Show or Echo Dot, see your MCP Apps screens, and check it against Amazon's published requirements.",
+  "license": "MIT",
+  "author": "Nick Moore",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "alexa-plus-simulator": "dist/server/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "alexa",
+    "alexa+",
+    "mcp",
+    "model-context-protocol",
+    "mcp-apps",
+    "simulator",
+    "echo-show"
+  ],
+  "scripts": {
+    "build": "vite build && vite build --config vite.server.config.ts",
+    "start": "node dist/server/cli.js",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.ui.json",
+    "test": "vitest run",
+    "check": "pnpm build && pnpm typecheck && vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/core": "2.3.1",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@types/node": "22",
+    "fast-check": "4.10.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.5",
+    "zod": "4.6.7"
+  }
+}
