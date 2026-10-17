@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tasks</title>
+    <style>
+      :root {
+        --bg: #0f1418;
+        --ink: #f1f4f6;
+        --muted: #9aa7b0;
+        --line: #26313a;
+        --accent: #2fd4ff;
+        color-scheme: dark;
+      }
+      :root[data-theme="light"] {
+        --bg: #f6f8f9;
+        --ink: #14202a;
+        --muted: #5b6873;
+        --line: #d9e0e5;
+        --accent: #00779a;
+        color-scheme: light;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--ink);
+        font: 28px/1.35 system-ui, sans-serif;
+      }
+      main {
+        box-sizing: border-box;
+        height: 100%;
+        padding: 6% 7%;
+        overflow: auto;
+      }
+      h1 {
+        margin: 0 0 0.6em;
+        font-size: 1.6em;
+      }
+      ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      li {
+        display: flex;
+        align-items: center;
+        gap: 0.7em;
+        padding: 0.55em 0;
+        border-bottom: 1px solid var(--line);
+      }
+      button {
+        flex: none;
+        width: 1.3em;
+        height: 1.3em;
+        border: 3px solid var(--accent);
+        border-radius: 50%;
+        background: none;
+        color: var(--bg);
+        font: inherit;
+        line-height: 1;
+        cursor: pointer;
+      }
+      li.done button {
+        background: var(--accent);
+      }
+      li.done span {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      p {
+        color: var(--muted);
+      }
+      /* A small screen (an Echo Show 5) gets a tighter layout. */
+      @media (max-height: 520px) {
+        body {
+          font-size: 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Tasks</h1>
+      <ul id="list"></ul>
+      <p id="empty" hidden>Nothing left to do.</p>
+    </main>
+    <script>
+      // The MCP Apps protocol by hand: JSON-RPC over postMessage with the host.
+      let nextId = 1;
+      const pending = new Map();
+      const send = (message) => parent.postMessage(message, "*");
+      const request = (method, params) =>
+        new Promise((resolve, reject) => {
+          const id = nextId++;
+          pending.set(id, { resolve, reject });
+          send({ jsonrpc: "2.0", id, method, params });
+        });
+
+      function theme(context) {
+        if (context && context.theme) document.documentElement.dataset.theme = context.theme;
+      }
+
+      function render(view) {
+        const tasks = (view && view.tasks) || [];
+        const list = document.getElementById("list");
+        list.replaceChildren(
+          ...tasks.map((task) => {
+            const li = document.createElement("li");
+            li.className = task.done ? "done" : "";
+            const box = document.createElement("button");
+            box.type = "button";
+            box.setAttribute("aria-label", task.done ? `${task.text}, done` : `Check off ${task.text}`);
+            box.disabled = task.done;
+            box.textContent = task.done ? "✓" : "";
+            box.addEventListener("click", async () => {
+              const result = await request("tools/call", { name: "complete_task", arguments: { id: task.id } });
+              render(result.structuredContent);
+              // So the assistant knows what was tapped when someone next speaks.
+              request("ui/update-model-context", { content: [{ type: "text", text: `Checked off "${task.text}" on the screen.` }] });
+            });
+            const text = document.createElement("span");
+            text.textContent = task.text;
+            li.append(box, text);
+            return li;
+          }),
+        );
+        document.getElementById("empty").hidden = tasks.some((t) => !t.done);
+      }
+
+      addEventListener("message", (event) => {
+        const m = event.data;
+        if (!m || m.jsonrpc !== "2.0") return;
+        if (m.id !== undefined && !m.method) {
+          const waiting = pending.get(m.id);
+          pending.delete(m.id);
+          if (waiting) m.error ? waiting.reject(m.error) : waiting.resolve(m.result);
+          return;
+        }
+        if (m.method === "ui/notifications/tool-result") render(m.params.structuredContent);
+        if (m.method === "ui/notifications/host-context-changed") theme(m.params);
+        if (m.method === "ui/resource-teardown" || m.method === "ping") send({ jsonrpc: "2.0", id: m.id, result: {} });
+      });
+
+      request("ui/initialize", { appInfo: { name: "tasks-screen", version: "0.1.0" }, appCapabilities: {}, protocolVersion: "2026-01-26" }).then((result) => {
+        theme(result.hostContext);
+        send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+      });
+    </script>
+  </body>
+</html>
