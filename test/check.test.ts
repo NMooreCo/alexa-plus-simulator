@@ -129,7 +129,7 @@ describe("DL-01 Streamable HTTP", () => {
     expect(report.rules.filter((r) => r.id !== "DL-01" && r.category === "mcp-data").every((r) => r.status === "SKIP")).toBe(true);
     expect(rule("AU-01")).toMatchObject({ status: "SKIP", notes: expect.stringContaining("sign-in wasn't checked") });
     expect(report.verdict).toBe("NOT_READY");
-    expect(server.cancelled()).toBe(true);
+    expect(server.canceled()).toBe(true);
   });
 
   it("works over SSE framing throughout", async () => {
@@ -276,6 +276,8 @@ describe("DL-06 error handling", () => {
     ["html", "FAIL", "isn't JSON or SSE"],
     ["bare404", "FAIL", "HTTP 404"],
     ["hang", "FAIL", "no answer within 100 ms"],
+    ["deaf", "FAIL", "no answer within 100 ms"],
+    ["stall", "FAIL", "no answer within 100 ms"],
   ] as const)("a server answering a missing tool with %s gets %s", async (missingTool, status, note) => {
     const { rule } = await check(fakeServer({ missingTool }), { timeoutMs: 100 });
     expect(rule("DL-06")).toMatchObject({ status, notes: expect.stringContaining(note) });

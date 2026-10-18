@@ -39,7 +39,7 @@ export interface FakeOptions {
   /** Milliseconds each request takes, on the fake clock. */
   latency?: (method: string, params: Json | undefined) => number;
   /** How a call to a tool that doesn't exist is answered. */
-  missingTool?: "error" | "isError" | "http500" | "success" | "hang" | "html" | "bare404";
+  missingTool?: "error" | "isError" | "http500" | "success" | "hang" | "deaf" | "stall" | "html" | "bare404";
   auth?: { token: string; status?: 401 | 403; wwwAuthenticate?: string; guard?: "all" | "tools/call" };
   /** Documents served by path, like "/.well-known/oauth-protected-resource". */
   documents?: Record<string, unknown>;
@@ -192,6 +192,12 @@ export function fakeServer(options: FakeOptions = {}) {
               return reply({ result: { content: [{ type: "text", text: "Done!" }] } });
             case "hang":
               return hang(init);
+            case "deaf":
+              // Ignores the abort signal too, as some fetch implementations and proxies do.
+              return new Promise<Response>(() => {});
+            case "stall":
+              // Answers, then never sends the event; a body made here doesn't hear the abort signal.
+              return new Response(streamOf([() => new Promise<string>(() => {})]), { headers: { "Content-Type": "text/event-stream" } });
             case "html":
               return new Response("<html>Oops</html>", { headers: { "Content-Type": "text/html" } });
             case "bare404":
@@ -247,7 +253,7 @@ export function fakeServer(options: FakeOptions = {}) {
  * then stays open, as those servers do.
  */
 export function legacySseServer() {
-  let cancelled = false;
+  let canceled = false;
   const fetch: Fetch = async (input, init) => {
     const request = new Request(input, init);
     if (request.method !== "GET") return new Response("Cannot POST /sse", { status: 404 });
@@ -256,12 +262,12 @@ export function legacySseServer() {
         controller.enqueue(encoder.encode("event: endpoint\ndata: /messages?sessionId=abc123\n\n"));
       },
       cancel() {
-        cancelled = true;
+        canceled = true;
       },
     });
     return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
   };
-  return { fetch, cancelled: () => cancelled };
+  return { fetch, canceled: () => canceled };
 }
 
 function buildSdkServer(): McpServer {

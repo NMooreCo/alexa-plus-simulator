@@ -42,7 +42,8 @@ export async function runChecks(options: CheckOptions): Promise<ReadinessReport>
 
   const transport = {
     url: options.serverUrl,
-    fetch: options.fetch ?? globalThis.fetch,
+    // Bound, since a detached fetch throws "Illegal invocation" in browsers and some other runtimes.
+    fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
     now: options.now ?? (() => performance.now()),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
