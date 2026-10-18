@@ -155,12 +155,16 @@ describe("resolveStaticPath", () => {
     expect(resolveStaticPath(root, "/a/../b.js")).toBe(join(root, "b.js"));
   });
 
-  it.each(["/..", "/../secret", "/..%2fsecret", "/%2e%2e/secret", "/a/..%2f..%2fsecret", "/..%5csecret", "/a/%2e%2e%5c%2e%2e%5csecret", "/%00", "/%E0%A4%A"])(
-    "refuses %s",
-    (path) => {
-      expect(resolveStaticPath(root, path)).toBeUndefined();
-    },
-  );
+  it.each(["/..", "/../secret", "/..%2fsecret", "/%2e%2e/secret", "/a/..%2f..%2fsecret", "/%00", "/%E0%A4%A"])("refuses %s", (path) => {
+    expect(resolveStaticPath(root, path)).toBeUndefined();
+  });
+
+  it.each(["/..%5csecret", "/a/%2e%2e%5c%2e%2e%5csecret"])("keeps %s inside the folder, refusing it where a backslash separates", (path) => {
+    // On Windows a backslash climbs like a slash; elsewhere it's part of a file name, which stays inside.
+    const found = resolveStaticPath(root, path);
+    if (process.platform === "win32") expect(found).toBeUndefined();
+    else expect(found?.startsWith(root + sep)).toBe(true);
+  });
 
   it("never resolves outside the folder, whatever the segments", () => {
     const segment = fc.constantFrom("..", ".", "%2e%2e", "%2E%2e", "assets", "a b", "%2f", "%5c", "\\", "..%2f", "..%5c", "C:", "...", "%2e", "~");
