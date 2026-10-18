@@ -1,7 +1,6 @@
-import { DISCLAIMER, type ReadinessReport, type RuleResult, type RuleStatus, type Verdict } from "../shared/contract.ts";
+import { DISCLAIMER, type ReadinessReport, type RuleResult, type RuleStatus, VERSION, type Verdict } from "../shared/contract.ts";
 
-/** The version a report names when the caller doesn't pass package.json's. */
-export const VERSION = "0.1.0";
+export { VERSION };
 
 /** Like the Local Inspector's verdicts: any failure fails, warnings make it conditional, skips don't count. */
 export function verdictOf(rules: RuleResult[]): Verdict {

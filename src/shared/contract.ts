@@ -5,6 +5,9 @@
  * report. See docs/alexa-requirements.md for where each number comes from.
  */
 
+/** Kept equal to package.json's version (a test checks). */
+export const VERSION = "0.1.0";
+
 export const DEFAULT_SERVER_PORT = 6277;
 export const DEFAULT_CLIENT_PORT = 6274;
 
