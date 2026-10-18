@@ -124,7 +124,8 @@ function fit() {
   const room = stageEl.clientWidth - 30;
   const tall = Math.max(240, innerHeight - 220);
   const scale = Math.min(1, room / device.width, tall / device.height);
-  screenEl.style.transform = `scale(${scale})`;
+  // At full size, no transform at all: the screen renders crisper.
+  screenEl.style.transform = scale < 1 ? `scale(${scale})` : "";
   deviceEl.style.width = `${device.width * scale}px`;
   deviceEl.style.height = `${device.height * scale}px`;
 }
@@ -157,7 +158,12 @@ async function setDevice(d: Device) {
     ? `A simulated Alexa+ on an ${d.name}: no screen, so everything has to work by voice.`
     : `A simulated Alexa+ on an ${d.name}. Alexa+ renders a tool's MCP Apps screen when the tool names one in _meta.ui.resourceUri, and Amazon asks that screens work on both surfaces.`;
   if (mounted) await mounted.bridge.sendHostContextChange({ containerDimensions: { width: d.width!, height: d.height! } });
-  else if (!dot && lastScreen) await showScreen(lastScreen.tool, lastScreen.uri, lastScreen.args, lastScreen.result).catch(() => {});
+  else if (!dot && lastScreen) {
+    // Shown again fresh when its tool only reads (taps may have changed things since); a change isn't made twice.
+    const { tool, uri, args, result } = lastScreen;
+    const fresh = tool.annotations?.readOnlyHint ? await client.callTool({ name: tool.name, arguments: args }).catch(() => result) : result;
+    await showScreen(tool, uri, args, fresh.isError ? result : fresh).catch(() => {});
+  }
 }
 devicePick.addEventListener("change", () => void setDevice(DEVICES.find((d) => d.id === devicePick.value)!));
 themeEl.addEventListener("change", () => {
@@ -246,14 +252,34 @@ function addTraffic(rec: RpcRecord) {
     : `Every MCP request this page makes, through the simulator's proxy. Alexa+ asks for a round trip under ${LATENCY_BUDGET_MS} ms.`;
 }
 
-/** The proxy's record of every exchange: what happened before this page opened, then each one as it happens. */
+const rpcKey = (rec: RpcRecord) => `${rec.ts}|${rec.method}|${JSON.stringify(rec.id ?? null)}`;
+
+/**
+ * The proxy's record of every exchange: what happened before this page
+ * opened, then each one as it happens. It listens first and catches up
+ * second, so nothing between the two is missed, and shows an exchange that's
+ * in both once.
+ */
 async function watchProxy() {
+  const events = new EventSource(api("/events"));
+  let early: RpcRecord[] | null = [];
+  events.addEventListener("rpc", (e) => {
+    const rec = JSON.parse((e as MessageEvent<string>).data) as RpcRecord;
+    if (early) early.push(rec);
+    else addTraffic(rec);
+  });
+  await new Promise<void>((resolve) => {
+    events.addEventListener("open", () => resolve(), { once: true });
+    setTimeout(resolve, 3000);
+  });
   const seen = (await fetch(api("/state"))
     .then((r) => r.json())
     .catch(() => null)) as ProxyState | null;
-  for (const rec of seen?.rpc.slice(-100) ?? []) addTraffic(rec);
-  const events = new EventSource(api("/events"));
-  events.addEventListener("rpc", (e) => addTraffic(JSON.parse((e as MessageEvent<string>).data) as RpcRecord));
+  const caughtUp = seen?.rpc.slice(-100) ?? [];
+  const known = new Set(caughtUp.map(rpcKey));
+  for (const rec of caughtUp) addTraffic(rec);
+  for (const rec of early) if (!known.has(rpcKey(rec))) addTraffic(rec);
+  early = null;
   events.addEventListener("error", (e) => {
     // The proxy's own "error" events carry data; the browser's connection errors don't.
     if (e instanceof MessageEvent && e.data) {
