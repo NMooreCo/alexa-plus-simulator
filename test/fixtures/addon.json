@@ -1,0 +1,83 @@
+{
+  "manifestVersion": "1.0",
+  "storeListing": {
+    "distributionCountries": [
+      "US"
+    ],
+    "locales": {
+      "en-US": {
+        "default": "DEFAULT",
+        "name": {
+          "value": "Trail Weather",
+          "spokenForm": {
+            "format": "ipa",
+            "value": " "
+          }
+        },
+        "shortDescription": "Forecasts for the trailhead you're headed to.",
+        "fullDescription": "Trail Weather tells you what to expect at the trailhead: temperature, wind and the chance of storms, hour by hour.",
+        "examplePhrases": [
+          "Alexa, ask Trail Weather what it's like at Bear Lake",
+          "Alexa, ask Trail Weather if it will storm this afternoon",
+          "Alexa, ask Trail Weather for the wind on Longs Peak"
+        ],
+        "privacyAndCompliance": {
+          "privacyPolicyUrl": "https://trailweather.example.com/privacy",
+          "termsOfUseUrl": "https://trailweather.example.com/terms"
+        },
+        "mediaAssets": {
+          "icons": {
+            "light": [
+              {
+                "size": "72x72",
+                "uri": "https://trailweather.example.com/icons/light-72.png"
+              },
+              {
+                "size": "64x64",
+                "uri": "https://trailweather.example.com/icons/light-64.png"
+              },
+              {
+                "size": "88x88",
+                "uri": "https://trailweather.example.com/icons/light-88.png"
+              },
+              {
+                "size": "126x126",
+                "uri": "https://trailweather.example.com/icons/light-126.png"
+              },
+              {
+                "size": "180x180",
+                "uri": "https://trailweather.example.com/icons/light-180.png"
+              },
+              {
+                "size": "241x241",
+                "uri": "https://trailweather.example.com/icons/light-241.png"
+              }
+            ],
+            "dark": []
+          },
+          "carouselImages": [
+            {
+              "uri": "https://trailweather.example.com/carousel/bear-lake.png",
+              "altText": "An hourly forecast for Bear Lake",
+              "size": "600x900"
+            }
+          ],
+          "bannerImages": []
+        }
+      }
+    }
+  },
+  "integrations": [
+    {
+      "type": "MCP",
+      "config": {
+        "endpoints": {
+          "default": {
+            "type": "HTTPS",
+            "uri": "https://mcp.trailweather.example.com"
+          }
+        }
+      }
+    }
+  ]
+}
