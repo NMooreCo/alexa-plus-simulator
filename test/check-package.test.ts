@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import type { RuleResult, RuleStatus } from "../src/shared/contract.ts";
 import { validatePackage } from "../src/check/index.ts";
 
-// Shaped like the example addon.json in Amazon's quickstart, with our own values.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// The fixture is shaped like the example addon.json in Amazon's quickstart, with our own values.
+// Untyped, since each case breaks it in a different way that a schema type would refuse.
 type Loose = any;
 const example = (): Loose => JSON.parse(readFileSync(new URL("./fixtures/addon.json", import.meta.url), "utf8"));
 const enUs = (addon: Loose): Loose => addon.storeListing.locales["en-US"];

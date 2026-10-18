@@ -132,6 +132,13 @@ describe("DL-01 Streamable HTTP", () => {
     expect(server.canceled()).toBe(true);
   });
 
+  it("fails a URL with nothing behind it without calling it the legacy transport", async () => {
+    const server = fakeServer();
+    const { rule } = await check(server, { serverUrl: "https://addon.example.com/wrong" });
+    expect(rule("DL-01")).toMatchObject({ status: "FAIL", notes: "The initialize request failed: HTTP 404: Not Found." });
+    expect(server.sent.map((s) => s.httpMethod)).toEqual(["POST", "GET"]);
+  });
+
   it("works over SSE framing throughout", async () => {
     const { report, rule } = await check(fakeServer({ framing: "sse" }));
     expect(statuses(report, "mcp-data")).toEqual(ALL_DATA_PASS);

@@ -18,8 +18,9 @@ export interface FakeTool {
   inputSchema?: unknown;
   annotations?: Json;
   _meta?: Json;
-  /** What a call returns; a function gets the call's number, counting from 1. */
+  /** What every call returns. */
   result?: unknown;
+  /** What call number n returns, counting from 1, for a tool whose answer changes. */
   results?: (call: number) => unknown;
   /** Asks the client for its roots mid-stream and answers only once it replies (SSE framing only). */
   asksForRoots?: boolean;
