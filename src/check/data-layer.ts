@@ -12,6 +12,9 @@ import { RULES, judge, listOf, sentence } from "./rules.ts";
 const LIST_SAMPLES = 3;
 /** A server that never stops returning nextCursor shouldn't keep the check paging. */
 const MAX_PAGES = 20;
+/** The other read-only tools timed once each, so a slow one (often a screen's) shows; a cap on how many and how long. */
+const MAX_TIMED_TOOLS = 25;
+const TIMED_TOOLS_BUDGET_MS = 30_000;
 
 export const DATA_LAYER_RULES = [
   RULES.streamableHttp,
@@ -60,6 +63,8 @@ interface Evidence {
   listFailure?: { exchange: Exchange; problem?: string };
   safeTool?: string;
   calls: Exchange[];
+  /** One call to each other tool that's safe to call, for the latency rule. */
+  otherCalls: Exchange[];
   screens: { uri: string; exchange: Exchange }[];
   missingTool?: { name: string; exchange: Exchange };
 }
@@ -153,7 +158,7 @@ async function gather(session: McpSession, transport: Transport, token: string |
     };
   }
 
-  const e: Evidence = { withToken: Boolean(token), init, listings: [], calls: [], screens: [] };
+  const e: Evidence = { withToken: Boolean(token), init, listings: [], calls: [], otherCalls: [], screens: [] };
   if (!resultOf(init)) {
     if (init.outcome.kind === "http" && init.status! >= 400 && init.status! < 500 && !isRefusal(init)) {
       e.legacyEndpoint = await legacySseEndpoint(transport, token);
@@ -178,6 +183,14 @@ async function gather(session: McpSession, transport: Transport, token: string |
     const first = await session.request("tools/call", call, `tools/call ${e.safeTool}`);
     e.calls.push(first);
     if (usableResult(first)) e.calls.push(await session.request("tools/call", call, `tools/call ${e.safeTool}`));
+    // Every other tool that's safe to call, once, since Alexa+'s budget covers each one (a screen's own refresh included).
+    const started = transport.now();
+    for (const tool of (e.tools ?? []).filter(isSafe).slice(0, MAX_TIMED_TOOLS)) {
+      const name = toolName(tool)!;
+      if (name === e.safeTool) continue;
+      if (transport.now() - started > TIMED_TOOLS_BUDGET_MS) break;
+      e.otherCalls.push(await session.request("tools/call", { name, arguments: {} }, `tools/call ${name}`));
+    }
   }
 
   // Screens named on tool definitions (MCP Apps) and in a tool result, as Amazon's documented result has them.
@@ -194,7 +207,7 @@ async function gather(session: McpSession, transport: Transport, token: string |
   const name = missingToolName(new Set((e.tools ?? []).map(toolName).filter((n) => n !== undefined)));
   e.missingTool = { name, exchange: await session.request("tools/call", { name, arguments: {} }, "tools/call (no such tool)") };
 
-  const sent = [...e.listings, ...e.calls, ...e.screens.map((s) => s.exchange), e.missingTool.exchange];
+  const sent = [...e.listings, ...e.calls, ...e.otherCalls, ...e.screens.map((s) => s.exchange), e.missingTool.exchange];
   const refused = token ? undefined : sent.find(isRefusal);
   return {
     rules: [
@@ -302,10 +315,10 @@ function toolDefinitions(e: Evidence): RuleResult {
   return judge(rule, "PASS", `The server lists ${count}, each with a name, a description and an object inputSchema.`);
 }
 
-/** The round trips Amazon's budget covers: initialize, listing, reading screens and calling a tool. */
+/** The round trips Amazon's budget covers: initialize, listing, reading screens and calling tools. */
 function latency(e: Evidence): RuleResult {
   const rule = RULES.latency;
-  const timed = [e.init, ...e.listings, ...e.calls, ...e.screens.map((s) => s.exchange)].filter(
+  const timed = [e.init, ...e.listings, ...e.calls, ...e.otherCalls, ...e.screens.map((s) => s.exchange)].filter(
     (x) => x.outcome.kind !== "network" && !(isRefusal(x) && !e.withToken),
   );
   if (!timed.length) return judge(rule, "SKIP", "No round trips were timed.");
@@ -320,7 +333,9 @@ function latency(e: Evidence): RuleResult {
     return judge(rule, "FAIL", `Median ${ms(median)}, at or over the ${LATENCY_BUDGET_MS} ms budget; slowest ${ms(slowest.durationMs)} (${slowest.label}); ${over} of ${trips} over.`);
   }
   if (slowest.durationMs >= LATENCY_BUDGET_MS) {
-    return judge(rule, "WARN", `Median ${ms(median)}, but ${over} of ${trips} took ${LATENCY_BUDGET_MS} ms or more; slowest ${ms(slowest.durationMs)} (${slowest.label}).`);
+    // Each slow request by name, slowest first, so the one to fix is plain.
+    const slow = [...new Set(sorted.filter((x) => x.durationMs >= LATENCY_BUDGET_MS).reverse().map((x) => `${x.label} ${ms(x.durationMs)}`))];
+    return judge(rule, "WARN", `Median ${ms(median)}, but ${over} of ${trips} took ${LATENCY_BUDGET_MS} ms or more; slowest ${ms(slowest.durationMs)} (${slowest.label}). Over: ${listOf(slow)}.`);
   }
   return judge(rule, "PASS", `Median ${ms(median)}, slowest ${ms(slowest.durationMs)} (${slowest.label}), over ${trips}.`);
 }

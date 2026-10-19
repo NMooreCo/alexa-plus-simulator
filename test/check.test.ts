@@ -232,6 +232,31 @@ describe("DL-04 latency", () => {
     expect(rule("DL-04").notes).toContain("900 ms (tools/call get_forecast)");
   });
 
+  it("times every other read-only tool once, naming a slow one, and never calls a tool that isn't read-only", async () => {
+    const refresh: FakeTool = { name: "refresh_ranch", description: "The ranch screen's refresh.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, result: { content: [{ type: "text", text: "{}" }], structuredContent: {} } };
+    const server = fakeServer({
+      tools: [FORECAST_TOOL, BOOKING_TOOL, refresh],
+      latency: (method, params) => (method === "tools/call" && params?.name === "refresh_ranch" ? 4000 : 40),
+    });
+    const { rule } = await check(server);
+    expect(rule("DL-04")).toMatchObject({ status: "WARN" });
+    expect(rule("DL-04").notes).toContain("Over: tools/call refresh_ranch 4000 ms.");
+    expect(server.calledTools().filter((name) => !name.startsWith(MISSING))).toEqual(["get_forecast", "get_forecast", "refresh_ranch"]);
+    // Its result isn't what DL-05 and DL-07 judge: they stay with the first read-only tool.
+    expect(rule("DL-05").notes).toContain("get_forecast");
+  });
+
+  it("stops timing other tools once that has taken 30 seconds", async () => {
+    const slow = (name: string): FakeTool => ({ name, description: "Slow.", inputSchema: { type: "object" }, annotations: { readOnlyHint: true }, result: { content: [{ type: "text", text: "ok" }], structuredContent: {} } });
+    const server = fakeServer({
+      tools: [FORECAST_TOOL, slow("a"), slow("b"), slow("c"), slow("d")],
+      latency: (method, params) => (method === "tools/call" && params?.name !== "get_forecast" && !String(params?.name).startsWith(MISSING) ? 20_000 : 10),
+    });
+    await check(server, { timeoutMs: 60_000 });
+    // a and b take 40 seconds between them; c would start past the budget.
+    expect(server.calledTools().filter((name) => !name.startsWith(MISSING))).toEqual(["get_forecast", "get_forecast", "a", "b"]);
+  });
+
   it("passes and reports the median and the slowest", async () => {
     let n = 0;
     const server = fakeServer({ latency: () => 10 * ++n });

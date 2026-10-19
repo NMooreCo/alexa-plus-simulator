@@ -458,12 +458,23 @@ async function showScreen(tool: Tool, uri: string, args: Record<string, unknown>
   await m.bridge.sendToolResult(result as Parameters<AppBridge["sendToolResult"]>[0]);
 }
 
-// What a screen's policy blocked, from the watcher withCsp puts in it.
+// What a screen's policy blocked, from the watcher withCsp puts in it: each thing once per screen.
+const reported = new WeakMap<Mounted, Set<string>>();
 addEventListener("message", (e) => {
   const data = e.data as { type?: string; blocked?: string; directive?: string } | null;
   if (data?.type !== CSP_VIOLATION || !mounted || e.source !== mounted.iframe.contentWindow) return;
+  const blocked = data.blocked || "something";
   const directive = data.directive ?? "";
-  addLog(talkLog, "error", `The screen tried to load ${data.blocked || "something"} (${directive}) without declaring it. Add its origin to _meta.ui.csp.${cspFix(directive)} on the resource.`, "", true);
+  const seen = reported.get(mounted) ?? new Set<string>();
+  reported.set(mounted, seen);
+  if (seen.has(`${blocked} ${directive}`)) return;
+  seen.add(`${blocked} ${directive}`);
+  if (blocked === "eval" || blocked === "wasm-eval") {
+    // Libraries such as zod test whether eval works and carry on without it, so this is a note, not a failure.
+    addLog(talkLog, "screen", "tried eval, which its policy blocks (as hosts generally do). Libraries like zod only test for it and carry on; if the screen breaks, it needs code that doesn't depend on eval.");
+    return;
+  }
+  addLog(talkLog, "error", `The screen tried to load ${blocked} (${directive}) without declaring it. Add its origin to _meta.ui.csp.${cspFix(directive)} on the resource.`, "", true);
 });
 
 // ---------- The assistant ----------
