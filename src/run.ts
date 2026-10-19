@@ -18,6 +18,7 @@ Options:
   --token <token>        Bearer token for a server that needs sign-in (or set MCP_TOKEN)
   --header "Name: value" Another header on every request to the server (repeatable)
   --addon <addon.json>   Your add-on package: its example phrases show as suggestions, and the check includes it
+  --extension <file.js>  An extension for the page: an ES module whose default export is the extension (repeatable)
   --server-port <port>   The proxy's port (default ${DEFAULT_SERVER_PORT})
   --client-port <port>   The page's port (default ${DEFAULT_CLIENT_PORT})
   --model <id>           The Claude model standing in for Alexa+ (default ${DEFAULT_MODEL})
@@ -34,6 +35,7 @@ const OPTIONS = {
   token: { type: "string" },
   header: { type: "string", multiple: true },
   addon: { type: "string" },
+  extension: { type: "string", multiple: true },
   "server-port": { type: "string" },
   "client-port": { type: "string" },
   model: { type: "string" },
@@ -140,10 +142,23 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
   const apiKey = io.env.ANTHROPIC_API_KEY;
   const model = values.model ?? DEFAULT_MODEL;
   const phrases = examplePhrases(addon);
+  // Each extension is served by the proxy for the page to import; read now, so a missing file says so at the start.
+  const extensions = await Promise.all(
+    (values.extension ?? []).map(async (file, i) => {
+      try {
+        return { path: `/extensions/${i}.js`, source: await readFile(file, "utf8") };
+      } catch (err) {
+        throw new UsageError(`Couldn't read the extension ${file}: ${err instanceof Error ? err.message : err}`);
+      }
+    }),
+  );
   const json = (body: unknown, status = 200) => Response.json(body, { status });
   const routes: Record<string, Route> = {
     "/api/model": modelRoute({ apiKey, baseURL: io.env.ANTHROPIC_BASE_URL, model, fallbacks: !values["no-fallbacks"] }),
-    "/api/info": async () => json({ version: VERSION, model: apiKey ? model : null, phrases }),
+    "/api/info": async () => json({ version: VERSION, model: apiKey ? model : null, phrases, extensions: extensions.map((e) => e.path) }),
+    ...Object.fromEntries(
+      extensions.map(({ path, source }): [string, Route] => [path, async () => new Response(source, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" } })]),
+    ),
     "/api/check": async (request) => {
       if (request.method !== "POST") return json({ error: { code: "method", message: "POST to run the check." } }, 405);
       try {

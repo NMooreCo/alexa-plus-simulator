@@ -81,6 +81,28 @@ describe("the command line", () => {
     }
   });
 
+  it("serves each --extension for the page to import, and lists them", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
+    const file = join(dir, "hello.js");
+    await writeFile(file, "export default (sim) => ({ beforeTurn: () => ['hello'] });\n");
+    const sim = capture({});
+    const done = main([example.url, "--server-port", "0", "--client-port", "0", "--extension", file], sim.io);
+    const { url } = await sim.running;
+    try {
+      const info = (await (await fetch(`${url}/api/info`)).json()) as { extensions: string[] };
+      expect(info.extensions).toEqual(["/extensions/0.js"]);
+      const served = await fetch(`${url}${info.extensions[0]}`);
+      expect(served.headers.get("content-type")).toContain("text/javascript");
+      expect(await served.text()).toContain("export default");
+    } finally {
+      sim.stop();
+      expect(await done).toBe(0);
+    }
+    const missing = capture();
+    expect(await main([example.url, "--extension", join(dir, "nope.js")], missing.io)).toBe(2);
+    expect(missing.err[0]).toContain("Couldn't read the extension");
+  });
+
   it("checks a server from the command line, writes the report, and fails the run only when a rule fails", async () => {
     const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
     const out = join(dir, "readiness-report.json");

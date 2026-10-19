@@ -789,3 +789,87 @@ footer {
   margin-top: auto;
   padding-top: 8px;
 }
+
+/* ---------- What extensions add to ---------- */
+
+/* Speaking up on its own, the way an Echo's light shows a notification. */
+.lightbar[data-state="notify"] {
+  opacity: 1;
+  background: #f2b65a;
+  box-shadow: 0 0 24px #f2b65a;
+  animation: pulse 0.9s ease-in-out infinite;
+}
+
+.dot .lightbar[data-state="notify"] {
+  background: none;
+  border-color: #f2b65a;
+  box-shadow: 0 0 36px #f2b65a;
+}
+
+/* Over the screen (scaled with it) and over the whole device: only what extensions put there takes clicks. */
+.screen-slot,
+.device-slot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.screen-slot > *,
+.device-slot > * {
+  pointer-events: auto;
+}
+
+.dot .device-slot {
+  border-radius: 50%;
+}
+
+.header-slot:empty,
+.panel-slot:empty {
+  display: none;
+}
+
+.chip-label {
+  display: inline-block;
+  margin-right: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.device-label {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.device-label strong {
+  color: var(--ink);
+}
+
+/* ---------- Compact: the device and the talk bar, for a page that shows several devices ---------- */
+
+.alexa-sim.compact .layout {
+  grid-template-columns: 1fr;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+}
+
+.alexa-sim.compact .stage-bar,
+.alexa-sim.compact .device-note,
+.alexa-sim.compact header,
+.alexa-sim.compact .tabs,
+.alexa-sim.compact footer,
+.alexa-sim.compact .tab-panel .hint {
+  display: none;
+}
+
+.alexa-sim.compact .device {
+  margin: 0 auto;
+}
+
+.alexa-sim.compact .log {
+  max-height: 32vh;
+}

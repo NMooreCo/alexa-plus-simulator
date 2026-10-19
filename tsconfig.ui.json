@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true
   },
-  "include": ["src/ui", "src/shared"]
+  "include": ["src/ui", "src/shared", "src/check"]
 }

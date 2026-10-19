@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.ui.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src",
+    "outDir": "dist/lib/types"
+  },
+  "include": ["src/ui/simulator.ts"]
+}
