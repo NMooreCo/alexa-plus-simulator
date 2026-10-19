@@ -50,6 +50,23 @@ alexa-plus-simulator validate <addon.json>     Check an add-on package's addon.j
 
 `ANTHROPIC_API_KEY` turns on talking, and `ANTHROPIC_BASE_URL` points it at a gateway. The key stays on your machine: the page asks the simulator's own server, which asks Anthropic.
 
+## The readiness rules
+
+Each rule quotes the requirement it checks, with a link, in the report itself. The check only ever calls tools marked `readOnlyHint: true` that need no arguments, plus a made-up tool name to see how errors come back.
+
+| Rule | Checks |
+|---|---|
+| DL-01 Streamable HTTP | `initialize` as Alexa+ sends it succeeds (a server that only speaks the legacy HTTP+SSE transport fails) |
+| DL-02 Protocol version | The server negotiates `2025-03-26`, the version Alexa+ asks for |
+| DL-03 Tool definitions | Every tool has a name, a description and an object `inputSchema` |
+| DL-04 Latency under 500 ms | `initialize`, listing, each screen and each read-only tool, timed; the median must be under 500 ms, and each slow request is named |
+| DL-05 Tool results | A tool's result has text and `structuredContent`, as Amazon's documented result does |
+| DL-06 Error handling | A call to a tool that doesn't exist gets a JSON-RPC error or `isError`, never a 5xx, a hang or HTML |
+| DL-07 Repeated calls | The same read-only call twice returns the same result |
+| DL-08 Screens | Each `_meta.ui.resourceUri` reads back as HTML (otherwise Alexa+ uses its data-only flow) |
+| AU-01 to AU-08 | For a server that needs sign-in: 401 or 403 without a token, no `WWW-Authenticate` header, protected resource metadata at the root path, authorization server metadata, PKCE with S256, the authorization and token endpoints, refresh tokens, and HTTPS |
+| PK-01 to PK-14 | `addon.json` (with `--addon`, or `validate`): the manifest version, countries, name and description lengths, example phrases, HTTPS policy links, icon, carousel and banner sizes, the MCP integration and its HTTPS endpoint, and image formats |
+
 ## For coding agents
 
 The simulator runs a local proxy between the page and your server, shaped like the Local Inspector's, so an agent can drive and watch the same session:

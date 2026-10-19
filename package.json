@@ -32,7 +32,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.ui.json",
     "test": "vitest run",
     "check": "pnpm build && pnpm typecheck && vitest run",
-    "example": "node examples/tasks/server.mjs"
+    "example": "node examples/tasks/server.mjs",
+    "prepublishOnly": "pnpm check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0"
