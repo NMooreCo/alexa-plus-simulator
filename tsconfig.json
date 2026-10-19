@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true
   },
-  "include": ["src/cli.ts", "src/proxy", "src/check", "src/model", "src/link", "src/shared", "test", "vitest.config.ts", "vite.config.ts", "vite.server.config.ts"]
+  "include": ["src/cli.ts", "src/proxy", "src/check", "src/model", "src/link", "src/visual", "src/report", "src/shared", "test", "vitest.config.ts", "vite.config.ts", "vite.server.config.ts"]
 }

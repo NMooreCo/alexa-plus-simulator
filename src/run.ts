@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { buildReport, formatReport, runChecks, validatePackage } from "./check/index.ts";
 import { DEFAULT_MODEL, modelRoute } from "./model/index.ts";
 import { type Route, startProxy } from "./proxy/index.ts";
+import { htmlReport } from "./report/html.ts";
 import { DEFAULT_CLIENT_PORT, DEFAULT_SERVER_PORT, DISCLAIMER, type ReadinessReport, type RuleResult, VERSION } from "./shared/contract.ts";
+import { checkScreens } from "./visual/index.ts";
 
 export const USAGE = `Alexa+ simulator ${VERSION} (unofficial; not affiliated with Amazon)
 
@@ -26,6 +30,10 @@ Options:
   --open                 Open the simulator in the browser
   --verbose              Log every exchange
   --out <file>           check: also write the report as JSON
+  --html <file>          check: also write the report as a page to share, with the screenshots
+  --visual               check: show every screen on the Echo Show 5, 8 and 15 in a headless browser, and judge them
+  --screenshots <dir>    check --visual: where the screenshots go (default readiness-screenshots)
+  --browser <name>       check --visual: chrome, msedge or chromium (default: the first one installed)
   --json                 check, validate: print JSON instead of a summary
 
 Talking needs ANTHROPIC_API_KEY (and ANTHROPIC_BASE_URL for a gateway); the Tools tab works without it.
@@ -44,6 +52,10 @@ const OPTIONS = {
   verbose: { type: "boolean" },
   out: { type: "string" },
   json: { type: "boolean" },
+  html: { type: "string" },
+  visual: { type: "boolean" },
+  screenshots: { type: "string" },
+  browser: { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const;
@@ -176,7 +188,7 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
     token,
     headers: headers(values.header),
     verbose: values.verbose,
-    uiDir: fileURLToPath(new URL("../ui", import.meta.url)),
+    uiDir: uiDir(),
     routes,
   });
   io.out(`Alexa+ simulator ${VERSION} (unofficial)`);
@@ -192,14 +204,29 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
   return 0;
 }
 
+/** The built page: beside the CLI once built, or in dist when running from source (tests). */
+function uiDir(): string {
+  const here = fileURLToPath(new URL("../ui", import.meta.url));
+  return existsSync(join(here, "assets")) ? here : fileURLToPath(new URL("../dist/ui", import.meta.url));
+}
+
 async function check(target: string, values: ParsedValues, io: Io): Promise<number> {
   const serverUrl = mcpUrl(target);
   const addon = await readAddon(values.addon);
-  const base = await runChecks({ serverUrl, token: values.token ?? io.env.MCP_TOKEN });
-  const report = addon === undefined ? base : withRules(base, validatePackage(addon));
+  const token = values.token ?? io.env.MCP_TOKEN;
+  const base = await runChecks({ serverUrl, token });
+  let report = addon === undefined ? base : withRules(base, validatePackage(addon));
+  if (values.visual) {
+    const screenshots = values.screenshots ?? "readiness-screenshots";
+    const screens = await checkScreens({ serverUrl, token, headers: headers(values.header), uiDir: uiDir(), outDir: screenshots, ...(values.browser ? { browser: values.browser } : {}) });
+    report = withRules(report, screens.rules);
+    report.artifacts = screens.shots.filter((s) => s.path).map((s) => ({ kind: "screenshot", tool: s.tool, uri: s.uri, device: s.device, path: s.path! }));
+    if (!values.json) io.out(`Rendered ${screens.shots.length} screen${screens.shots.length === 1 ? "" : "s"} in ${screens.browser}; the screenshots are in ${screenshots}.`);
+  }
   if (values.out) await writeFile(values.out, `${JSON.stringify(report, null, 2)}\n`);
+  if (values.html) await writeFile(values.html, htmlReport(report, values.html));
   io.out(values.json ? JSON.stringify(report, null, 2) : formatReport(report));
-  if (values.out && !values.json) io.out(`Wrote ${values.out}.`);
+  if (!values.json) for (const file of [values.out, values.html]) if (file) io.out(`Wrote ${file}.`);
   return report.verdict === "NOT_READY" ? 1 : 0;
 }
 

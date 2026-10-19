@@ -50,6 +50,9 @@ const sim = await startSimulator({
   extensions,
 });
 
+// The running simulator, for coding agents and the screen check (check --visual) to drive the page.
+(window as unknown as { alexaPlusSimulator: typeof sim }).alexaPlusSimulator = sim;
+
 if (!info?.model) {
   sim.root.querySelector("#model-note")!.textContent = "No ANTHROPIC_API_KEY, so talking is off. Call tools yourself from the Tools tab, or restart the simulator with the key set.";
 }

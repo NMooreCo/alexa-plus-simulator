@@ -139,6 +139,19 @@ export interface ReadinessReport {
   skipCount: number;
   rules: RuleResult[];
   disclaimer: string;
+  /** Files the check made, like a screenshot of each screen on each device (check --visual). */
+  artifacts?: ReportArtifact[];
+}
+
+export interface ReportArtifact {
+  kind: "screenshot";
+  /** The tool whose call showed the screen. */
+  tool: string;
+  uri: string;
+  /** A device id, like "show-8". */
+  device: string;
+  /** Where the file is, as the CLI wrote it. */
+  path: string;
 }
 
 export const DISCLAIMER =

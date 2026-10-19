@@ -44,7 +44,8 @@
     "prepublishOnly": "pnpm check"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0"
+    "@anthropic-ai/sdk": "^0.135.0",
+    "playwright-core": "1.63.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",
