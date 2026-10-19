@@ -39,6 +39,7 @@ alexa-plus-simulator validate <addon.json>     Check an add-on package's addon.j
 | `--token <token>` | A bearer token for a server that needs sign-in (or set `MCP_TOKEN`), sent on every request |
 | `--header "Name: value"` | Another header on every request to the server (repeatable) |
 | `--addon <addon.json>` | Your add-on package: its example phrases become suggestions, and the check includes it |
+| `--extension <file.js>` | An extension for the page (repeatable); see [Extending it](#extending-it) |
 | `--server-port <port>` | The proxy's port (default 6277) |
 | `--client-port <port>` | The page's port (default 6274) |
 | `--model <id>` | The Claude model standing in for Alexa+ (default `claude-opus-5-5`) |
@@ -66,6 +67,19 @@ Each rule quotes the requirement it checks, with a link, in the report itself. T
 | DL-08 Screens | Each `_meta.ui.resourceUri` reads back as HTML (otherwise Alexa+ uses its data-only flow) |
 | AU-01 to AU-08 | For a server that needs sign-in: 401 or 403 without a token, no `WWW-Authenticate` header, protected resource metadata at the root path, authorization server metadata, PKCE with S256, the authorization and token endpoints, refresh tokens, and HTTPS |
 | PK-01 to PK-14 | `addon.json` (with `--addon`, or `validate`): the manifest version, countries, name and description lengths, example phrases, HTTPS policy links, icon, carousel and banner sizes, the MCP integration and its HTTPS endpoint, and image formats |
+
+## Extending it
+
+Extensions add to the simulated Echo: a control in the panel, your own voice, who's speaking, a passcode, a scripted demo. An extension is a function that gets the running simulator and returns the hooks it wants. Give one to the CLI with `--extension`, or host the simulator in your own page as a library (`alexa-plus-simulator/ui`) with as many as you like:
+
+```js
+import { startSimulator } from "alexa-plus-simulator/ui";
+import "alexa-plus-simulator/ui/style.css";
+
+await startSimulator({ mcpUrl: "/mcp", modelUrl: "/api/model", check: "browser", extensions: [myExtension] });
+```
+
+[docs/extensions.md](docs/extensions.md) has the hooks, the API and an example.
 
 ## For coding agents
 
