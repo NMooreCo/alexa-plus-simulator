@@ -787,14 +787,23 @@ export async function startSimulator(options: SimulatorOptions): Promise<Simulat
     const inBrowser = () =>
       new Promise<void>((resolve) => {
         if (!("speechSynthesis" in window)) return resolve();
+        let quiet: ReturnType<typeof setInterval> | undefined;
+        const finish = () => {
+          clearInterval(quiet);
+          resolve();
+        };
         const u = new SpeechSynthesisUtterance(text);
         const v = browserVoice();
         if (v) u.voice = v;
         u.rate = 1.04;
         u.onstart = started;
-        u.onend = u.onerror = () => resolve();
-        abort.signal.addEventListener("abort", () => resolve(), { once: true });
+        u.onend = u.onerror = finish;
+        abort.signal.addEventListener("abort", finish, { once: true });
         speechSynthesis.speak(u);
+        // Done once the browser has gone quiet too: some never fire onend (Chrome on long lines), or never speak at all.
+        quiet = setInterval(() => {
+          if (!speechSynthesis.speaking && !speechSynthesis.pending) finish();
+        }, 500);
       });
     const voice = hooks.find((h) => h.speak);
     void (async () => {
