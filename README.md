@@ -39,6 +39,7 @@ alexa-plus-simulator validate <addon.json>     Check an add-on package's addon.j
 | `--token <token>` | A bearer token for a server that needs sign-in (or set `MCP_TOKEN`), sent on every request |
 | `--header "Name: value"` | Another header on every request to the server (repeatable) |
 | `--addon <addon.json>` | Your add-on package: its example phrases become suggestions, and the check includes it |
+| `--calls <calls.json>` | Sample calls for the check to make, with arguments; see [Testing tools that need arguments](#testing-tools-that-need-arguments) |
 | `--extension <file.js>` | An extension for the page (repeatable); see [Extending it](#extending-it) |
 | `--server-port <port>` | The proxy's port (default 6277) |
 | `--client-port <port>` | The page's port (default 6274) |
@@ -53,20 +54,37 @@ alexa-plus-simulator validate <addon.json>     Check an add-on package's addon.j
 
 ## The readiness rules
 
-Each rule quotes the requirement it checks, with a link, in the report itself. The check only ever calls tools marked `readOnlyHint: true` that need no arguments, plus a made-up tool name to see how errors come back.
+Each rule quotes the requirement it checks, with a link, in the report itself. On its own, the check only calls tools marked `readOnlyHint: true` that need no arguments, plus a made-up tool name to see how errors come back; it makes any other call only when you list it with `--calls`.
 
 | Rule | Checks |
 |---|---|
 | DL-01 Streamable HTTP | `initialize` as Alexa+ sends it succeeds (a server that only speaks the legacy HTTP+SSE transport fails) |
 | DL-02 Protocol version | The server negotiates `2025-03-26`, the version Alexa+ asks for |
 | DL-03 Tool definitions | Every tool has a name, a description and an object `inputSchema` |
-| DL-04 Latency under 500 ms | `initialize`, listing, each screen and each read-only tool, timed; the median must be under 500 ms, and each slow request is named |
-| DL-05 Tool results | A tool's result has text and `structuredContent`, as Amazon's documented result does |
+| DL-04 Latency under 500 ms | `initialize`, listing, each screen, each read-only tool and each listed call, timed; the median must be under 500 ms, and each slow request is named |
+| DL-05 Tool results | Each result the check gets (from its own pick and every listed call) has text and `structuredContent`, as Amazon's documented result does |
 | DL-06 Error handling | A call to a tool that doesn't exist gets a JSON-RPC error or `isError`, never a 5xx, a hang or HTML |
 | DL-07 Repeated calls | The same read-only call twice returns the same result |
-| DL-08 Screens | Each `_meta.ui.resourceUri` reads back as HTML (otherwise Alexa+ uses its data-only flow) |
+| DL-08 Screens | Each `_meta.ui.resourceUri`, on a tool or in a result, reads back as HTML (otherwise Alexa+ uses its data-only flow) |
 | AU-01 to AU-08 | For a server that needs sign-in: 401 or 403 without a token, no `WWW-Authenticate` header, protected resource metadata at the root path, authorization server metadata, PKCE with S256, the authorization and token endpoints, refresh tokens, and HTTPS |
 | PK-01 to PK-14 | `addon.json` (with `--addon`, or `validate`): the manifest version, countries, name and description lengths, example phrases, HTTPS policy links, icon, carousel and banner sizes, the MCP integration and its HTTPS endpoint, and image formats |
+
+## Testing tools that need arguments
+
+The check can't guess arguments, and on its own it never calls a tool that might change something, so when every tool needs arguments, DL-05 and DL-07 are skipped. List sample calls in a file:
+
+```json
+[
+  { "tool": "get_forecast", "arguments": { "city": "Denver" } },
+  { "tool": "add_task", "arguments": { "text": "Bring the hose in" } }
+]
+```
+
+```bash
+npx alexa-plus-simulator check https://your-server.example.com/mcp --calls calls.json
+```
+
+Each listed call is made as written, even to a tool that isn't marked read-only: you chose it for your own server, so point the check at test data. Its round trip counts toward latency (DL-04), its result is judged and named (DL-05), and a screen its result names is read (DL-08). A call to a read-only tool is made twice to compare the results (DL-07); any other call is made once. A tool you don't list is still only called when it's read-only and needs no arguments, and a listed tool the server doesn't list isn't called at all. The simulator takes `--calls` too, for the check on its page.
 
 ## Extending it
 

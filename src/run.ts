@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { buildReport, formatReport, runChecks, validatePackage } from "./check/index.ts";
+import { buildReport, formatReport, parseCalls, runChecks, type ToolCall, validatePackage } from "./check/index.ts";
 import { DEFAULT_MODEL, modelRoute } from "./model/index.ts";
 import { type Route, startProxy } from "./proxy/index.ts";
 import { DEFAULT_CLIENT_PORT, DEFAULT_SERVER_PORT, DISCLAIMER, type ReadinessReport, type RuleResult, VERSION } from "./shared/contract.ts";
@@ -18,6 +18,8 @@ Options:
   --token <token>        Bearer token for a server that needs sign-in (or set MCP_TOKEN)
   --header "Name: value" Another header on every request to the server (repeatable)
   --addon <addon.json>   Your add-on package: its example phrases show as suggestions, and the check includes it
+  --calls <calls.json>   Sample calls for the check, like [{ "tool": "get_forecast", "arguments": { "city": "Denver" } }]:
+                         made even to a tool not marked read-only, and repeated only for read-only ones
   --extension <file.js>  An extension for the page: an ES module whose default export is the extension (repeatable)
   --server-port <port>   The proxy's port (default ${DEFAULT_SERVER_PORT})
   --client-port <port>   The page's port (default ${DEFAULT_CLIENT_PORT})
@@ -35,6 +37,7 @@ const OPTIONS = {
   token: { type: "string" },
   header: { type: "string", multiple: true },
   addon: { type: "string" },
+  calls: { type: "string" },
   extension: { type: "string", multiple: true },
   "server-port": { type: "string" },
   "client-port": { type: "string" },
@@ -102,6 +105,22 @@ async function readAddon(path: string | undefined): Promise<unknown> {
   }
 }
 
+/** The sample calls for the check, read and checked at the start so a bad file is fixed before any call is made. */
+async function readCalls(path: string | undefined): Promise<ToolCall[] | undefined> {
+  if (!path) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, "utf8"));
+  } catch (err) {
+    throw new UsageError(`Couldn't read ${path}: ${err instanceof Error ? err.message : err}`);
+  }
+  try {
+    return parseCalls(parsed, path);
+  } catch (err) {
+    throw new UsageError((err as Error).message);
+  }
+}
+
 /** The add-on's example phrases, wherever the package keeps them (they're per locale). */
 export function examplePhrases(addon: unknown): string[] {
   const found: string[] = [];
@@ -138,6 +157,7 @@ function openBrowser(url: string) {
 async function simulate(target: string, values: ParsedValues, io: Io): Promise<number> {
   const upstream = mcpUrl(target);
   const addon = await readAddon(values.addon);
+  const calls = await readCalls(values.calls);
   const token = values.token ?? io.env.MCP_TOKEN;
   const apiKey = io.env.ANTHROPIC_API_KEY;
   const model = values.model ?? DEFAULT_MODEL;
@@ -162,7 +182,7 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
     "/api/check": async (request) => {
       if (request.method !== "POST") return json({ error: { code: "method", message: "POST to run the check." } }, 405);
       try {
-        const report = await runChecks({ serverUrl: upstream, token });
+        const report = await runChecks({ serverUrl: upstream, token, calls });
         return json(addon === undefined ? report : withRules(report, validatePackage(addon)));
       } catch (err) {
         return json({ error: { code: "check_failed", message: err instanceof Error ? err.message : String(err) } }, 500);
@@ -195,7 +215,8 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
 async function check(target: string, values: ParsedValues, io: Io): Promise<number> {
   const serverUrl = mcpUrl(target);
   const addon = await readAddon(values.addon);
-  const base = await runChecks({ serverUrl, token: values.token ?? io.env.MCP_TOKEN });
+  const calls = await readCalls(values.calls);
+  const base = await runChecks({ serverUrl, token: values.token ?? io.env.MCP_TOKEN, calls });
   const report = addon === undefined ? base : withRules(base, validatePackage(addon));
   if (values.out) await writeFile(values.out, `${JSON.stringify(report, null, 2)}\n`);
   io.out(values.json ? JSON.stringify(report, null, 2) : formatReport(report));

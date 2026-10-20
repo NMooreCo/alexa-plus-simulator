@@ -1,5 +1,5 @@
 import type { RuleResult } from "../shared/contract.ts";
-import { challengeOf, isRefusal, missingToolName, type SignIn } from "./data-layer.ts";
+import { challengeOf, isRefusal, missingToolName, type ProbeCall, type SignIn } from "./data-layer.ts";
 import { McpSession, clip, getJson, isObject, type JsonObject, type Transport } from "./rpc.ts";
 import { RULES, judge, listOf } from "./rules.ts";
 
@@ -24,9 +24,10 @@ export const AUTH_RULES = [
  * With a token, the data layer runs signed in, so this asks again without
  * one: initialize, then tools/list, then a tool call, since Amazon's account
  * linking guide expects a refusal "when a tool is called without a valid
- * token" and some servers only guard the calls.
+ * token" and some servers only guard the calls. The call is a read-only one
+ * the data layer made, so making it again unsigned can't change anything.
  */
-export async function probeSignIn(transport: Transport, toolName: string | undefined): Promise<SignIn> {
+export async function probeSignIn(transport: Transport, probe: ProbeCall | undefined): Promise<SignIn> {
   const session = new McpSession(transport);
   try {
     const init = await session.initialize();
@@ -36,8 +37,9 @@ export async function probeSignIn(transport: Transport, toolName: string | undef
     const list = await session.request("tools/list");
     if (isRefusal(list)) return { challenge: challengeOf(list) };
     // A tool that doesn't exist when there's no read-only one: either way nothing can change.
-    const name = toolName ?? missingToolName(new Set());
-    const call = await session.request("tools/call", { name, arguments: {} }, `tools/call ${name}`);
+    const missing = missingToolName(new Set());
+    const { name, arguments: args, label } = probe ?? { name: missing, arguments: {}, label: missing };
+    const call = await session.request("tools/call", { name, arguments: args }, `tools/call ${label}`);
     return isRefusal(call) ? { challenge: challengeOf(call) } : {};
   } finally {
     await session.close();

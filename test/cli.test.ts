@@ -116,6 +116,51 @@ describe("the command line", () => {
     expect((JSON.parse(json.out.join("\n")) as ReadinessReport).serverUrl).toBe(example.url);
   });
 
+  it("makes the sample calls in --calls, in check and in the simulator's check", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
+    const calls = join(dir, "calls.json");
+    await writeFile(calls, JSON.stringify([{ tool: "add_task", arguments: { text: "Bring the hose in" } }]));
+    const run = capture();
+    await main(["check", example.url, "--calls", calls, "--json"], run.io);
+    const report = JSON.parse(run.out.join("\n")) as ReadinessReport;
+    const results = report.rules.find((r) => r.id === "DL-05")!;
+    // add_task isn't read-only, but it was listed: made once, judged, and named.
+    expect(results).toMatchObject({ status: "PASS", notes: `Each call returned text content and structuredContent: show_tasks; add_task({"text":"Bring the hose in"}).` });
+    expect(report.rules.find((r) => r.id === "DL-07")!.notes).toBe("Two calls to show_tasks with the same arguments returned the same result.");
+
+    const sim = capture({});
+    const done = main([example.url, "--server-port", "0", "--client-port", "0", "--calls", calls], sim.io);
+    const { url } = await sim.running;
+    try {
+      const fromPage = (await (await fetch(`${url}/api/check`, { method: "POST" })).json()) as ReadinessReport;
+      expect(fromPage.rules.find((r) => r.id === "DL-05")!.notes).toContain(`add_task({"text":"Bring the hose in"})`);
+    } finally {
+      sim.stop();
+      expect(await done).toBe(0);
+    }
+  });
+
+  it("says what's wrong with a calls file before checking anything", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
+    const write = async (name: string, text: string) => {
+      const file = join(dir, name);
+      await writeFile(file, text);
+      return file;
+    };
+    const cases: [string, string][] = [
+      [await write("broken.json", "[{ tool: "), "Couldn't read"],
+      [await write("object.json", `{ "tool": "add_task" }`), "must be a list of calls"],
+      [await write("named.json", `[{ "name": "add_task" }]`), `name the tool with "tool", not "name"`],
+      [join(dir, "nope.json"), "Couldn't read"],
+    ];
+    for (const [file, message] of cases) {
+      const run = capture();
+      expect(await main(["check", example.url, "--calls", file], run.io)).toBe(2);
+      expect(run.err[0]).toContain(message);
+      expect(run.out).toEqual([]);
+    }
+  });
+
   it("validates a package", async () => {
     const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
     const addon = join(dir, "addon.json");
