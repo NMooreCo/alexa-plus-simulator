@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { buildReport, formatReport, parseCalls, runChecks, type ToolCall, type TokenSource, validatePackage } from "./check/index.ts";
 import { sameResource } from "./check/auth.ts";
 import { CLIENT_SECRET_ENV, DEFAULT_CALLBACK_PORT, DEFAULT_TOKEN_FILE, link, TokenFile } from "./link/index.ts";
-import { DEFAULT_MODEL, modelRoute } from "./model/index.ts";
+import { DEFAULT_MODELS, isAwsRegion, isProviderName, modelOptionsFromEnv, setUpModel } from "./model/index.ts";
 import { type ProxyOptions, type Route, startProxy } from "./proxy/index.ts";
 import { htmlReport } from "./report/html.ts";
 import { DEFAULT_CLIENT_PORT, DEFAULT_SERVER_PORT, DISCLAIMER, type ReadinessReport, type RuleResult, VERSION } from "./shared/contract.ts";
@@ -32,7 +32,9 @@ Options:
   --extension <file.js>  An extension for the page: an ES module whose default export is the extension (repeatable)
   --server-port <port>   The proxy's port (default ${DEFAULT_SERVER_PORT})
   --client-port <port>   The page's port (default ${DEFAULT_CLIENT_PORT})
-  --model <id>           The Claude model standing in for Alexa+ (default ${DEFAULT_MODEL})
+  --provider <name>      Who stands in for Alexa+'s model: anthropic, bedrock or openai (default: the first with credentials, in that order)
+  --model <id>           The model (default ${DEFAULT_MODELS.anthropic}, ${DEFAULT_MODELS.bedrock} on Bedrock, ${DEFAULT_MODELS.openai} on OpenAI)
+  --region <region>      Bedrock's AWS Region (default AWS_REGION, AWS_DEFAULT_REGION or us-east-1)
   --no-fallbacks         Leave Anthropic's refusal fallback off (for a gateway that doesn't pass it through)
   --open                 Open the simulator in the browser
   --verbose              Log every exchange
@@ -46,7 +48,10 @@ Options:
                          link registers a client for testing when the authorization server allows it
   --callback-port <port> link: where the sign-in comes back, as http://127.0.0.1:<port>/callback (default ${DEFAULT_CALLBACK_PORT})
 
-Talking needs ANTHROPIC_API_KEY (and ANTHROPIC_BASE_URL for a gateway); the Tools tab works without it.
+Talking needs a model: ANTHROPIC_API_KEY (and ANTHROPIC_BASE_URL for a gateway); AWS_BEARER_TOKEN_BEDROCK, or
+AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN), for Bedrock; or OPENAI_API_KEY (and
+OPENAI_BASE_URL for Azure OpenAI, Ollama, LM Studio, Groq or another server that speaks its API). The Tools
+tab works without one.
 ${DISCLAIMER}`;
 
 const OPTIONS = {
@@ -60,7 +65,9 @@ const OPTIONS = {
   extension: { type: "string", multiple: true },
   "server-port": { type: "string" },
   "client-port": { type: "string" },
+  provider: { type: "string" },
   model: { type: "string" },
+  region: { type: "string" },
   "no-fallbacks": { type: "boolean" },
   open: { type: "boolean" },
   verbose: { type: "boolean" },
@@ -219,8 +226,11 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
   const addon = await readAddon(values.addon);
   const calls = await readCalls(values.calls);
   const tokens = await signIn(upstream, values, io);
-  const apiKey = io.env.ANTHROPIC_API_KEY;
-  const model = values.model ?? DEFAULT_MODEL;
+  const provider = values.provider;
+  if (provider !== undefined && !isProviderName(provider)) throw new UsageError(`--provider takes anthropic, bedrock or openai, not ${JSON.stringify(provider)}.`);
+  if (values.region !== undefined && !isAwsRegion(values.region)) throw new UsageError(`${values.region} isn't an AWS Region, like us-east-1.`);
+  // The provider and its model, from the flags and the credentials in the environment.
+  const model = setUpModel(modelOptionsFromEnv(io.env, { provider, model: values.model, region: values.region, fallbacks: !values["no-fallbacks"] }));
   const phrases = examplePhrases(addon);
   // Each extension is served by the proxy for the page to import; read now, so a missing file says so at the start.
   const extensions = await Promise.all(
@@ -234,8 +244,8 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
   );
   const json = (body: unknown, status = 200) => Response.json(body, { status });
   const routes: Record<string, Route> = {
-    "/api/model": modelRoute({ apiKey, baseURL: io.env.ANTHROPIC_BASE_URL, model, fallbacks: !values["no-fallbacks"] }),
-    "/api/info": async () => json({ version: VERSION, model: apiKey ? model : null, phrases, extensions: extensions.map((e) => e.path) }),
+    "/api/model": model.route,
+    "/api/info": async () => json({ version: VERSION, model: model.label, provider: model.provider, phrases, extensions: extensions.map((e) => e.path) }),
     ...Object.fromEntries(
       extensions.map(({ path, source }): [string, Route] => [path, async () => new Response(source, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" } })]),
     ),
@@ -262,7 +272,7 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
   io.out(`Alexa+ simulator ${VERSION} (unofficial)`);
   io.out(`  Simulator: ${proxy.uiUrl}`);
   io.out(`  Proxy:     ${proxy.url}/mcp -> ${upstream}`);
-  io.out(`  Model:     ${apiKey ? model : "none: set ANTHROPIC_API_KEY to talk (the Tools tab works without it)"}`);
+  io.out(`  Model:     ${model.summary}`);
   if (addon !== undefined) io.out(`  Add-on:    ${values.addon} (${phrases.length} example phrase${phrases.length === 1 ? "" : "s"})`);
   if (values["token-file"] !== undefined) io.out(`  Sign-in:   ${values["token-file"]}, refreshed as it expires`);
   io.out("Press Ctrl+C to stop.");

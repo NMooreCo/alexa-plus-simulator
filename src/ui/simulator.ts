@@ -727,7 +727,8 @@ export async function startSimulator(options: SimulatorOptions): Promise<Simulat
           addLog(
             talkLog,
             "error",
-            err.failure.code === "no_key" ? "Talking needs an Anthropic API key: restart the simulator with ANTHROPIC_API_KEY set. The Tools tab calls tools without one." : "Talking is off here. The Tools tab calls tools.",
+            // The route says what to set; the Tools tab works either way.
+            err.failure.code === "no_key" ? `${err.failure.message} The Tools tab calls tools without one.` : "Talking is off here. The Tools tab calls tools.",
             "",
             true,
           );

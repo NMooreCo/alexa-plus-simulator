@@ -52,8 +52,9 @@ describe("the command line", () => {
     try {
       const config = (await (await fetch(`${uiUrl}/config.json`)).json()) as { proxyUrl: string; upstream: string };
       expect(config.upstream).toBe(example.url);
-      const info = (await (await fetch(`${url}/api/info`)).json()) as { model: string | null; phrases: string[] };
+      const info = (await (await fetch(`${url}/api/info`)).json()) as { model: string | null; provider: string | null; phrases: string[] };
       expect(info.model).toBeNull();
+      expect(info.provider).toBeNull();
       expect(info.phrases).toEqual(["Alexa, what's on my list?", "Alexa, add milk to my list"]);
 
       const init = await fetch(`${url}/mcp`, {
@@ -76,10 +77,42 @@ describe("the command line", () => {
       // The package's rules are in it too.
       expect(report.rules.some((r) => r.category === "package")).toBe(true);
       expect(sim.out.join("\n")).toContain(uiUrl);
+      expect(sim.out.join("\n")).toContain("Model:     none: set ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) or OPENAI_API_KEY");
     } finally {
       sim.stop();
       expect(await done).toBe(0);
     }
+  });
+
+  it("says which model stands in for Alexa+, from the credentials it finds or the provider it's told", async () => {
+    const sim = capture({ AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key", AWS_REGION: "eu-west-1", OPENAI_API_KEY: "sk-test" });
+    const done = main([example.url, "--server-port", "0", "--client-port", "0"], sim.io);
+    const { url } = await sim.running;
+    try {
+      expect(await (await fetch(`${url}/api/info`)).json()).toMatchObject({ model: "Amazon Nova 2 Lite on Bedrock (global.amazon.nova-2-lite-v1:0)", provider: "bedrock" });
+      expect(sim.out).toContain("  Model:     Amazon Nova 2 Lite on Bedrock (global.amazon.nova-2-lite-v1:0) in eu-west-1, with a Bedrock API key");
+    } finally {
+      sim.stop();
+      expect(await done).toBe(0);
+    }
+    const told = capture({ AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key", OPENAI_API_KEY: "sk-test" });
+    const running = main([example.url, "--server-port", "0", "--client-port", "0", "--provider", "openai", "--model", "gpt-5.6-sol"], told.io);
+    const urls = await told.running;
+    try {
+      expect(await (await fetch(`${urls.url}/api/info`)).json()).toMatchObject({ model: "OpenAI (gpt-5.6-sol)", provider: "openai" });
+    } finally {
+      told.stop();
+      expect(await running).toBe(0);
+    }
+    const unknown = capture();
+    expect(await main([example.url, "--provider", "gemini"], unknown.io)).toBe(2);
+    expect(unknown.err[0]).toBe('--provider takes anthropic, bedrock or openai, not "gemini".');
+    const region = capture();
+    expect(await main([example.url, "--region", "us-east-1.example.com"], region.io)).toBe(2);
+    expect(region.err[0]).toContain("isn't an AWS Region");
+    const base = capture({ OPENAI_BASE_URL: "localhost:11434" });
+    expect(await main([example.url], base.io)).toBe(1);
+    expect(base.err[0]).toContain("OPENAI_BASE_URL");
   });
 
   it("serves each --extension for the page to import, and lists them", async () => {

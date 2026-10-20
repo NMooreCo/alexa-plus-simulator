@@ -44,7 +44,7 @@ const sim = await startSimulator({
   serverUrl: config.upstream,
   proxyUrl: config.proxyUrl,
   modelUrl: api("/api/model"),
-  ...(info?.model ? { modelLabel: `Claude (${info.model})` } : {}),
+  ...(info?.model ? { modelLabel: info.model } : {}),
   check: api("/api/check"),
   suggestions: info?.phrases ?? [],
   extensions,
@@ -54,5 +54,6 @@ const sim = await startSimulator({
 (window as unknown as { alexaPlusSimulator: typeof sim }).alexaPlusSimulator = sim;
 
 if (!info?.model) {
-  sim.root.querySelector("#model-note")!.textContent = "No ANTHROPIC_API_KEY, so talking is off. Call tools yourself from the Tools tab, or restart the simulator with the key set.";
+  sim.root.querySelector("#model-note")!.textContent =
+    "No model is set up, so talking is off. Call tools yourself from the Tools tab, or restart the simulator with a model's credentials set (the README's Models section has them).";
 }

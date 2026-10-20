@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { modelRoute, systemBlocks, VOICE } from "../src/model/index.ts";
+import { chooseProvider, modelOptionsFromEnv, modelRoute, setUpModel, systemBlocks, VOICE } from "../src/model/index.ts";
 
 const turn = (body: unknown) => new Request("http://localhost:6277/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const reply = { id: "msg_1", type: "message", role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text: "Here's today." }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 10, output_tokens: 4 } };
@@ -24,15 +24,18 @@ function anthropic(answer: () => Response = () => Response.json(reply)) {
 const apiError = (status: number, type: string) => () => Response.json({ type: "error", error: { type, message: type } }, { status, headers: { "retry-after": "0" } });
 
 describe("the model route", () => {
-  it("says plainly that a key is needed, and that the Tools panel works without one", async () => {
+  it("says plainly that credentials are needed, naming every provider's, and that the Tools panel works without them", async () => {
     const res = await modelRoute({})(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }));
     expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ error: { code: "no_key" } });
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("no_key");
+    for (const name of ["ANTHROPIC_API_KEY", "AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"]) expect(body.error.message).toContain(name);
+    expect(body.error.message).toContain("Tools panel");
   });
 
   it("asks Claude Opus 5.5 at low effort, with the refusal fallback, the voice rules cached and the turn's details after them", async () => {
     const api = anthropic();
-    const res = await modelRoute({ apiKey: "key", fetch: api.fetch })(
+    const res = await modelRoute({ anthropic: { apiKey: "key" }, fetch: api.fetch })(
       turn({
         messages: [{ role: "user", content: "What's on today?" }],
         tools: [{ name: "show_today", description: "Show today", input_schema: { type: "object" } }],
@@ -55,7 +58,7 @@ describe("the model route", () => {
 
   it("can leave the fallback off for a gateway that doesn't pass it through, and takes another model and base URL", async () => {
     const api = anthropic();
-    await modelRoute({ apiKey: "key", fallbacks: false, model: "claude-sonnet-5-5", baseURL: "https://gateway.example", fetch: api.fetch })(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }));
+    await modelRoute({ anthropic: { apiKey: "key", fallbacks: false, baseURL: "https://gateway.example" }, model: "claude-sonnet-5-5", fetch: api.fetch })(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }));
     const url = new URL(api.sent[0]!.url);
     expect(url.origin + url.pathname).toBe("https://gateway.example/v1/messages");
     expect(api.sent[0]!.body.fallbacks).toBeUndefined();
@@ -71,22 +74,121 @@ describe("the model route", () => {
 
   it("refuses a malformed or oversized turn before it costs anything", async () => {
     const fetch = vi.fn();
-    const route = modelRoute({ apiKey: "key", fetch });
-    expect((await route(turn({ messages: [], tools: [] }))).status).toBe(400);
-    expect((await route(turn({ messages: [{ role: "user", content: "hi" }], tools: [{ name: "bad name!", input_schema: {} }] }))).status).toBe(400);
-    expect((await route(turn({ messages: [{ role: "user", content: "x".repeat(400_001) }], tools: [] }))).status).toBe(400);
-    expect((await route(new Request("http://localhost/api/model", { method: "POST", body: "not json" }))).status).toBe(400);
-    expect((await route(new Request("http://localhost/api/model", { method: "GET" }))).status).toBe(405);
+    for (const options of [{ anthropic: { apiKey: "key" } }, { bedrock: { bearerToken: "key" } }, { openai: { apiKey: "key" } }]) {
+      const route = modelRoute({ ...options, fetch });
+      expect((await route(turn({ messages: [], tools: [] }))).status).toBe(400);
+      expect((await route(turn({ messages: [{ role: "user", content: "hi" }], tools: [{ name: "bad name!", input_schema: {} }] }))).status).toBe(400);
+      expect((await route(turn({ messages: [{ role: "user", content: "x".repeat(400_001) }], tools: [] }))).status).toBe(400);
+      expect((await route(new Request("http://localhost/api/model", { method: "POST", body: "not json" }))).status).toBe(400);
+      expect((await route(new Request("http://localhost/api/model", { method: "GET" }))).status).toBe(405);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses messages another provider couldn't read, without calling it", async () => {
+    const fetch = vi.fn();
+    const route = modelRoute({ openai: { apiKey: "key" }, fetch });
+    for (const messages of [["hi"], [{ role: "system", content: "hi" }], [{ role: "user", content: 7 }], [{ role: "user", content: [{ type: "tool_use", id: "t", name: "x", input: {} }] }]]) {
+      const res = await route(turn({ messages, tools: [] }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: { code: "bad_request" } });
+    }
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("says what went wrong with the key, the rate limit or the request", async () => {
-    const ask = (answer: () => Response) => modelRoute({ apiKey: "key", fetch: anthropic(answer).fetch })(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }));
+    const ask = (answer: () => Response) => modelRoute({ anthropic: { apiKey: "key" }, fetch: anthropic(answer).fetch })(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }));
     const bad = await ask(apiError(401, "authentication_error"));
     expect(bad.status).toBe(502);
     expect(await bad.json()).toMatchObject({ error: { code: "model_key" } });
     expect((await ask(apiError(429, "rate_limit_error"))).status).toBe(429);
     expect(await (await ask(apiError(400, "invalid_request_error"))).json()).toMatchObject({ error: { code: "bad_request" } });
     expect(await (await ask(apiError(529, "overloaded_error"))).json()).toMatchObject({ error: { code: "model_error" } });
+  });
+});
+
+describe("choosing the model", () => {
+  const env = {
+    anthropic: { ANTHROPIC_API_KEY: "sk-ant" },
+    bedrockKey: { AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key" },
+    bedrockIam: { AWS_ACCESS_KEY_ID: "AKIDEXAMPLE", AWS_SECRET_ACCESS_KEY: "secret" },
+    openai: { OPENAI_API_KEY: "sk-openai" },
+    local: { OPENAI_BASE_URL: "http://localhost:11434/v1" },
+  };
+  const choose = (vars: Record<string, string>, flags: Parameters<typeof modelOptionsFromEnv>[1] = {}) => chooseProvider(modelOptionsFromEnv(vars, flags));
+
+  it("takes the first provider with credentials: Anthropic, then Bedrock, then OpenAI", () => {
+    expect(choose({})).toBeNull();
+    expect(choose({ ...env.openai, ...env.bedrockKey, ...env.anthropic })).toBe("anthropic");
+    expect(choose({ ...env.openai, ...env.bedrockKey })).toBe("bedrock");
+    expect(choose({ ...env.openai, ...env.bedrockIam })).toBe("bedrock");
+    expect(choose(env.openai)).toBe("openai");
+    // A local server needs no key, only its address.
+    expect(choose(env.local)).toBe("openai");
+    // Half of an IAM key pair isn't credentials, and an empty variable is no variable.
+    expect(choose({ AWS_ACCESS_KEY_ID: "AKIDEXAMPLE", ANTHROPIC_API_KEY: "" })).toBeNull();
+  });
+
+  it("uses the provider it's told to, and only with its own credentials", () => {
+    expect(choose({ ...env.anthropic, ...env.openai }, { provider: "openai" })).toBe("openai");
+    expect(choose(env.anthropic, { provider: "bedrock" })).toBeNull();
+  });
+
+  it("names what a chosen provider still needs, and keeps Anthropic's own message", async () => {
+    const bedrock = setUpModel({ provider: "bedrock" });
+    expect(bedrock).toMatchObject({ provider: null, model: null, label: null });
+    expect(bedrock.summary).toBe("none: set AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) for Bedrock to talk (the Tools tab works without one)");
+    const said = ((await (await bedrock.route(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }))).json()) as { error: { message: string } }).error.message;
+    expect(said).toContain("AWS_BEARER_TOKEN_BEDROCK");
+    expect(said).not.toContain("ANTHROPIC_API_KEY");
+    const claude = setUpModel({ provider: "anthropic" });
+    expect(((await (await claude.route(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }))).json()) as { error: { message: string } }).error.message).toBe(
+      "Set ANTHROPIC_API_KEY to talk to the simulator. You can still call tools from the Tools panel.",
+    );
+    expect(setUpModel({}).summary).toContain("ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) or OPENAI_API_KEY");
+  });
+
+  it("calls each model something readable, and says where it runs", () => {
+    const setUp = (vars: Record<string, string>, flags: Parameters<typeof modelOptionsFromEnv>[1] = {}) => setUpModel(modelOptionsFromEnv(vars, flags));
+    expect(setUp(env.anthropic)).toMatchObject({ provider: "anthropic", model: "claude-opus-5-5", label: "Claude (claude-opus-5-5)", summary: "Claude (claude-opus-5-5) through Anthropic" });
+    expect(setUp({ ...env.anthropic, ANTHROPIC_BASE_URL: "https://gateway.example" }).summary).toBe("Claude (claude-opus-5-5) through https://gateway.example");
+    expect(setUp(env.bedrockKey)).toMatchObject({
+      provider: "bedrock",
+      model: "global.amazon.nova-2-lite-v1:0",
+      label: "Amazon Nova 2 Lite on Bedrock (global.amazon.nova-2-lite-v1:0)",
+      summary: "Amazon Nova 2 Lite on Bedrock (global.amazon.nova-2-lite-v1:0) in us-east-1, with a Bedrock API key",
+    });
+    expect(setUp(env.bedrockIam, { model: "us.amazon.nova-pro-v1:0", region: "us-west-2" })).toMatchObject({
+      label: "Amazon Nova Pro on Bedrock (us.amazon.nova-pro-v1:0)",
+      summary: "Amazon Nova Pro on Bedrock (us.amazon.nova-pro-v1:0) in us-west-2, with IAM credentials",
+    });
+    expect(setUp(env.bedrockKey, { model: "us.anthropic.claude-sonnet-5-5" }).label).toBe("Claude on Bedrock (us.anthropic.claude-sonnet-5-5)");
+    expect(setUp(env.bedrockKey, { model: "meta.llama3-3-70b-instruct-v1:0" }).label).toBe("Llama on Bedrock (meta.llama3-3-70b-instruct-v1:0)");
+    expect(setUp(env.bedrockKey, { model: "arn:aws:bedrock:us-east-1:111122223333:application-inference-profile/a1b2c3" }).label).toBe(
+      "A model on Bedrock (arn:aws:bedrock:us-east-1:111122223333:application-inference-profile/a1b2c3)",
+    );
+    expect(setUp(env.openai)).toMatchObject({ provider: "openai", model: "gpt-6-sol", label: "OpenAI (gpt-6-sol)", summary: "OpenAI (gpt-6-sol)" });
+    expect(setUp(env.local, { model: "llama3.2" })).toMatchObject({
+      label: "OpenAI-compatible server at localhost:11434 (llama3.2)",
+      summary: "OpenAI-compatible server at localhost:11434 (llama3.2), through http://localhost:11434/v1/chat/completions",
+    });
+    // A blank --model is no --model.
+    expect(setUp(env.openai, { model: "  " }).model).toBe("gpt-6-sol");
+  });
+
+  it("reads Bedrock's region from --region, then AWS_REGION, then AWS_DEFAULT_REGION", () => {
+    const region = (vars: Record<string, string>, flag?: string) => modelOptionsFromEnv({ ...env.bedrockKey, ...vars }, { region: flag }).bedrock?.region;
+    expect(region({ AWS_REGION: "eu-west-1", AWS_DEFAULT_REGION: "ap-southeast-2" }, "us-west-2")).toBe("us-west-2");
+    expect(region({ AWS_REGION: "eu-west-1", AWS_DEFAULT_REGION: "ap-southeast-2" })).toBe("eu-west-1");
+    expect(region({ AWS_DEFAULT_REGION: "ap-southeast-2" })).toBe("ap-southeast-2");
+    expect(setUpModel(modelOptionsFromEnv(env.bedrockKey)).summary).toContain(" in us-east-1,");
+  });
+
+  it("stops at the start on a Region or base URL that can't work", () => {
+    expect(() => setUpModel(modelOptionsFromEnv({ ...env.bedrockKey, AWS_REGION: "evil.example/x?" }))).toThrow(/AWS Region/);
+    expect(() => setUpModel(modelOptionsFromEnv({ OPENAI_BASE_URL: "localhost:11434" }))).toThrow(/OPENAI_BASE_URL/);
+    expect(() => setUpModel(modelOptionsFromEnv({ OPENAI_API_KEY: "sk", OPENAI_BASE_URL: "not a url" }))).toThrow(/OPENAI_BASE_URL/);
+    // A bad setting for a provider that isn't answering doesn't matter.
+    expect(setUpModel(modelOptionsFromEnv({ ...env.anthropic, AWS_REGION: "nowhere", OPENAI_BASE_URL: "nope" })).provider).toBe("anthropic");
   });
 });

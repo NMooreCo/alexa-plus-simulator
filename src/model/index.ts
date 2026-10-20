@@ -1,48 +1,137 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { ModelTurnRequest } from "../shared/contract.ts";
 import type { Route } from "../proxy/index.ts";
+import type { ModelTurnRequest } from "../shared/contract.ts";
+import { type AnthropicOptions, anthropicProvider, DEFAULT_ANTHROPIC_MODEL } from "./anthropic.ts";
+import { type BedrockOptions, bedrockProvider, DEFAULT_BEDROCK_MODEL, hasBedrockCredentials } from "./bedrock.ts";
+import { DEFAULT_OPENAI_MODEL, hasOpenAICredentials, type OpenAIOptions, openaiProvider } from "./openai.ts";
+import { type FetchLike, type Provider, TurnError } from "./provider.ts";
+
+export { isAwsRegion } from "./bedrock.ts";
+export { systemBlocks, VOICE } from "./prompt.ts";
 
 /**
- * The simulator's assistant: one Claude turn per request, in the Messages
- * API's shape. The page runs the tool loop (it is the MCP client, so it calls
- * the tools and shows the screens), and the key stays on this machine.
+ * The simulator's assistant: one model turn per request, in the Messages
+ * API's shape, from Anthropic, Amazon Bedrock or OpenAI (or a server that
+ * speaks OpenAI's API). The page runs the tool loop (it is the MCP client, so
+ * it calls the tools and shows the screens), and the credentials stay on this
+ * machine.
  */
 
+/** In the order they're tried when none is chosen. */
+export const PROVIDERS = ["anthropic", "bedrock", "openai"] as const;
+export type ProviderName = (typeof PROVIDERS)[number];
+
+export const DEFAULT_MODELS: Record<ProviderName, string> = { anthropic: DEFAULT_ANTHROPIC_MODEL, bedrock: DEFAULT_BEDROCK_MODEL, openai: DEFAULT_OPENAI_MODEL };
+
 export interface ModelOptions {
-  /** ANTHROPIC_API_KEY. Without one the page still works through its Tools panel. */
-  apiKey?: string;
-  /** ANTHROPIC_BASE_URL, for a gateway that speaks the Claude API. */
-  baseURL?: string;
-  /** The model id; Claude Opus 5.5 unless set. */
+  /** Who answers. Without one, the first that has credentials: Anthropic, then Bedrock, then OpenAI. */
+  provider?: ProviderName;
+  /** The model id; the provider's default unless set. */
   model?: string;
-  /** Anthropic's server-side refusal fallback; on unless turned off (some gateways don't pass it through). */
-  fallbacks?: boolean;
-  /** For tests: what sends the request. */
-  fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+  anthropic?: AnthropicOptions;
+  bedrock?: BedrockOptions;
+  openai?: OpenAIOptions;
+  /** For tests: what sends each request to the provider. */
+  fetch?: FetchLike;
+  /** For tests: the pause before Bedrock or OpenAI is tried again after being busy or out of reach (a second otherwise). */
+  retryDelayMs?: number;
 }
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
+export interface ModelSetup {
+  /** Who answers, or null when none has credentials (so talking is off). */
+  provider: ProviderName | null;
+  /** The model id, or null when talking is off. */
+  model: string | null;
+  /** What the page calls the model, like "Claude (claude-opus-5-5)"; null when talking is off. */
+  label: string | null;
+  /** The CLI's "Model:" line: the provider and model, or how to set one up. */
+  summary: string;
+  /** POST /api/model. */
+  route: Route;
+}
 
-/** How an Alexa+ device talks, for any add-on. The add-on's own instructions come after. */
-export const VOICE = `You are the voice of a smart device in someone's home: a simulated Alexa+ on an Amazon Echo, with an add-on (an MCP server) whose tools you can call. What you say is spoken aloud and shown as a caption.
+const NAMES: Record<ProviderName, string> = { anthropic: "Anthropic", bedrock: "Bedrock", openai: "OpenAI" };
 
-- Speak in plain sentences: no markdown, no bullet points, no emoji, no headings.
-- Keep it short, the way Alexa talks: one sentence, two at most, unless they ask for more. A screen carries the detail when there is one.
-- Lead with the answer or with what you did. No filler like "Okay" or "Sure", and don't repeat back what they asked.
-- Before a tool changes anything (creates, books, buys, sends, deletes or switches something), confirm in one short question first, unless they already asked for exactly that.
-- Ask at most one question, and make it the very last thing you say.
-- When a tool shows a screen, the screen is already in front of them: say one line about it, not everything on it.
-- Lines that start "(On the screen" tell you what someone just did by tapping the display.
-- When a tool fails, say plainly what didn't work and offer one next step.
-- You help with what the add-on's tools can do. For anything else, say briefly what you can help with.`;
+/** What each provider needs from the environment. */
+const NEEDS: Record<ProviderName, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  bedrock: "AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)",
+  openai: "OPENAI_API_KEY (or OPENAI_BASE_URL for a server that needs no key)",
+};
+const ANY = "ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) or OPENAI_API_KEY (or OPENAI_BASE_URL)";
+
+export function isProviderName(value: string): value is ProviderName {
+  return (PROVIDERS as readonly string[]).includes(value);
+}
+
+function hasCredentials(name: ProviderName, options: ModelOptions): boolean {
+  if (name === "anthropic") return Boolean(options.anthropic?.apiKey);
+  if (name === "bedrock") return hasBedrockCredentials(options.bedrock);
+  return hasOpenAICredentials(options.openai);
+}
+
+/** Who answers: the chosen provider when it has credentials, or the first that does; null when none can. */
+export function chooseProvider(options: ModelOptions): ProviderName | null {
+  if (options.provider) return hasCredentials(options.provider, options) ? options.provider : null;
+  return PROVIDERS.find((name) => hasCredentials(name, options)) ?? null;
+}
+
+/** The options from the environment, where the credentials live, and the CLI's flags. */
+export function modelOptionsFromEnv(
+  env: Record<string, string | undefined>,
+  flags: { provider?: ProviderName; model?: string; region?: string; fallbacks?: boolean } = {},
+): ModelOptions {
+  const read = (name: string) => env[name] || undefined;
+  return {
+    provider: flags.provider,
+    model: flags.model,
+    anthropic: { apiKey: read("ANTHROPIC_API_KEY"), baseURL: read("ANTHROPIC_BASE_URL"), fallbacks: flags.fallbacks },
+    bedrock: {
+      region: flags.region ?? read("AWS_REGION") ?? read("AWS_DEFAULT_REGION"),
+      bearerToken: read("AWS_BEARER_TOKEN_BEDROCK"),
+      accessKeyId: read("AWS_ACCESS_KEY_ID"),
+      secretAccessKey: read("AWS_SECRET_ACCESS_KEY"),
+      sessionToken: read("AWS_SESSION_TOKEN"),
+    },
+    openai: { apiKey: read("OPENAI_API_KEY"), baseURL: read("OPENAI_BASE_URL") },
+  };
+}
+
+/**
+ * The model route and what to call its model. It throws for a setting that
+ * can't work (an AWS Region or OPENAI_BASE_URL that isn't one), so the CLI
+ * says so at the start rather than on the first turn.
+ */
+export function setUpModel(options: ModelOptions = {}): ModelSetup {
+  const name = chooseProvider(options);
+  if (!name) {
+    const needs = options.provider ? `${NEEDS[options.provider]} for ${NAMES[options.provider]}` : ANY;
+    // Anthropic's own message is the one the route always gave.
+    const message =
+      options.provider === "anthropic"
+        ? "Set ANTHROPIC_API_KEY to talk to the simulator. You can still call tools from the Tools panel."
+        : `Set ${needs} to talk to the simulator. You can still call tools from the Tools panel.`;
+    return { provider: null, model: null, label: null, summary: `none: set ${needs} to talk (the Tools tab works without one)`, route: route(null, message) };
+  }
+  const model = options.model?.trim() || DEFAULT_MODELS[name];
+  const provider = createProvider(name, model, options);
+  return { provider: name, model, label: provider.label, summary: provider.summary, route: route(provider, "") };
+}
+
+function createProvider(name: ProviderName, model: string, options: ModelOptions): Provider {
+  const { fetch, retryDelayMs } = options;
+  if (name === "anthropic") return anthropicProvider({ ...options.anthropic, apiKey: options.anthropic?.apiKey ?? "", model, fetch });
+  if (name === "bedrock") return bedrockProvider({ ...options.bedrock, model, fetch, retryDelayMs });
+  return openaiProvider({ ...options.openai, model, fetch, retryDelayMs });
+}
+
+/** The route alone, for a caller that doesn't need its label. */
+export function modelRoute(options: ModelOptions): Route {
+  return setUpModel(options).route;
+}
 
 const MAX_BODY = 400_000;
 const MAX_MESSAGES = 100;
 const MAX_TOOLS = 128;
-
-function clip(v: unknown, max: number): string {
-  return typeof v === "string" ? v.slice(0, max) : "";
-}
 
 /** The turn, after checking its shape and size; or what's wrong with it. */
 function readTurn(raw: string): ModelTurnRequest | string {
@@ -63,63 +152,21 @@ function readTurn(raw: string): ModelTurnRequest | string {
   return { messages: body.messages, tools: body.tools, context: body.context };
 }
 
-/** The system prompt: what stays the same all session (cached), then what changes each turn. */
-export function systemBlocks(context: ModelTurnRequest["context"] = {}): Anthropic.Beta.BetaTextBlockParam[] {
-  const instructions = clip(context.instructions, 8000).trim();
-  const device = clip(context.device, 60).trim();
-  return [
-    {
-      type: "text",
-      text: instructions ? `${VOICE}\n\nThe add-on's own instructions:\n${instructions}` : VOICE,
-      cache_control: { type: "ephemeral" },
-    },
-    {
-      type: "text",
-      text: [
-        device ? `This device is an ${device}.` : "",
-        context.screen === false
-          ? "It has no screen: nothing a tool shows appears here. Say what matters in words (two or three short sentences when a screen would have carried the detail), and never mention a screen, a tab or a tap."
-          : "",
-        `The time zone is ${clip(context.timeZone, 64) || "unknown"}. It's now ${clip(context.now, 80) || "unknown"}.`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    },
-  ];
-}
-
-function error(status: number, code: string, message: string): Response {
+function failure(status: number, code: string, message: string): Response {
   return Response.json({ error: { code, message } }, { status });
 }
 
-export function modelRoute(options: ModelOptions): Route {
-  const model = options.model?.trim() || DEFAULT_MODEL;
-  const client = options.apiKey
-    ? new Anthropic({ apiKey: options.apiKey, maxRetries: 1, ...(options.baseURL ? { baseURL: options.baseURL } : {}), ...(options.fetch ? { fetch: options.fetch } : {}) })
-    : null;
+function route(provider: Provider | null, noKey: string): Route {
   return async (request) => {
-    if (request.method !== "POST") return error(405, "method", "POST a turn here.");
-    if (!client) return error(503, "no_key", "Set ANTHROPIC_API_KEY to talk to the simulator. You can still call tools from the Tools panel.");
+    if (request.method !== "POST") return failure(405, "method", "POST a turn here.");
+    if (!provider) return failure(503, "no_key", noKey);
     const turn = readTurn(await request.text());
-    if (typeof turn === "string") return error(400, "bad_request", turn);
+    if (typeof turn === "string") return failure(400, "bad_request", turn);
     try {
-      const message = await client.beta.messages.create({
-        model,
-        max_tokens: 16000,
-        // Spoken replies: low effort keeps an answer quick.
-        output_config: { effort: "low" },
-        // A declined request is run again on Anthropic's recommended model for its kind of refusal.
-        ...(options.fallbacks === false ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
-        system: systemBlocks(turn.context),
-        tools: turn.tools as Anthropic.Beta.BetaTool[],
-        messages: turn.messages as Anthropic.Beta.BetaMessageParam[],
-      });
+      const message = await provider.turn(turn, request.signal);
       return Response.json(message, { headers: { "x-model": message.model } });
     } catch (err) {
-      if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return error(502, "model_key", "Anthropic didn't accept the API key (or it can't use this model).");
-      if (err instanceof Anthropic.RateLimitError) return error(429, "rate_limited", "Anthropic is rate limiting this key. Try again in a moment.");
-      if (err instanceof Anthropic.BadRequestError) return error(400, "bad_request", err.message);
-      if (err instanceof Anthropic.APIError) return error(502, "model_error", `Anthropic answered ${err.status ?? "with an error"}.`);
+      if (err instanceof TurnError) return failure(err.status, err.code, err.message);
       throw err;
     }
   };

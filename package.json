@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
+"aws4fetch": "1.0.20",
     "playwright-core": "1.63.0"
   },
   "devDependencies": {
