@@ -22,3 +22,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Build, typecheck and every test, including the command line run against the example server.
       - run: pnpm check
+
+  e2e:
+    # The page is the same on every platform, so its browser tests run on one.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      # Builds, then drives the simulator's page in Chromium against the example server, through the built CLI.
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
