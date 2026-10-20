@@ -8,7 +8,7 @@ An open, unofficial simulator and readiness check for Alexa+ MCP add-ons. Point 
 npx alexa-plus-simulator https://your-server.example.com/mcp
 ```
 
-Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` to talk to it; without one you can still call every tool by hand and run the readiness check.
+Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` (or Amazon Bedrock or OpenAI credentials; see [Models](#models)) to talk to it; without any you can still call every tool by hand and run the readiness check.
 
 ## What it does
 
@@ -42,14 +42,32 @@ alexa-plus-simulator validate <addon.json>     Check an add-on package's addon.j
 | `--extension <file.js>` | An extension for the page (repeatable); see [Extending it](#extending-it) |
 | `--server-port <port>` | The proxy's port (default 6277) |
 | `--client-port <port>` | The page's port (default 6274) |
-| `--model <id>` | The Claude model standing in for Alexa+ (default `claude-opus-5-5`) |
+| `--provider <name>` | Who stands in for Alexa+'s model: `anthropic`, `bedrock` or `openai` (default: the first with credentials, in that order); see [Models](#models) |
+| `--model <id>` | The model standing in for Alexa+ (default `claude-opus-5-5` on Anthropic, `global.amazon.nova-2-lite-v1:0` on Bedrock, `gpt-6-sol` on OpenAI) |
+| `--region <region>` | Bedrock's AWS Region (default `AWS_REGION`, `AWS_DEFAULT_REGION` or `us-east-1`) |
 | `--no-fallbacks` | Leave Anthropic's refusal fallback off, for a gateway that doesn't pass it through |
 | `--open` | Open the simulator in the browser |
 | `--verbose` | Log every exchange |
 | `--out <file>` | `check`: also write the report as JSON |
 | `--json` | `check`, `validate`: print JSON instead of a summary |
 
-`ANTHROPIC_API_KEY` turns on talking, and `ANTHROPIC_BASE_URL` points it at a gateway. The key stays on your machine: the page asks the simulator's own server, which asks Anthropic.
+A model's credentials in the environment turn on talking: `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` for a gateway), `AWS_BEARER_TOKEN_BEDROCK` or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for Bedrock, or `OPENAI_API_KEY` and `OPENAI_BASE_URL` for OpenAI or a server that speaks its API. They stay on your machine: the page asks the simulator's own server, which asks the provider.
+
+## Models
+
+A model stands in for Alexa+'s own: it reads the conversation, decides what to say and which of your tools to call, and the page makes the calls. Any of three providers can be that model, each through its own API; the page works the same with all of them.
+
+| `--provider` | Credentials | Default model |
+|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY`, and `ANTHROPIC_BASE_URL` for a gateway | `claude-opus-5-5` at low effort, with Anthropic's refusal fallback |
+| `bedrock` | `AWS_BEARER_TOKEN_BEDROCK` (a Bedrock API key), or IAM credentials in `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`, which sign each request | `global.amazon.nova-2-lite-v1:0`: Amazon Nova 2 Lite with its reasoning off, through the Converse API |
+| `openai` | `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for Azure OpenAI, Ollama, LM Studio, Groq or another server that speaks Chat Completions (a local one needs no key) | `gpt-6-sol` with reasoning off, through Chat Completions |
+
+- Without `--provider`, the simulator uses the first of these it has credentials for, in that order, and its startup line and the page say which.
+- `--model` picks another model from the same provider: any Bedrock model that uses tools through Converse (Claude, Llama, Mistral and others, by model id, inference profile or ARN), or any model a Chat Completions server has. `--region` picks Bedrock's Region; otherwise it's `AWS_REGION`, `AWS_DEFAULT_REGION` or `us-east-1`.
+- Credentials come from the environment only, not from `~/.aws`. `aws configure export-credentials --format env` (or `--format powershell`) prints a profile's as variables to set.
+- OpenAI's flagship, GPT-6 Astra, and GPT-6.1 Sol call tools only through OpenAI's Responses API, so they can't stand in here yet; GPT-6 Sol calls them through Chat Completions with its reasoning off.
+- Bedrock and OpenAI were tested against recorded API responses, in the shapes each provider documents, not live calls, since no credentials were available.
 
 ## The readiness rules
 
