@@ -1,6 +1,6 @@
 import { ALEXA_PROTOCOL_VERSION, LATENCY_BUDGET_MS, type RuleResult, type RuleStatus } from "../shared/contract.ts";
 import { callKey, callLabel, type ToolCall } from "./calls.ts";
-import { McpSession, clip, isObject, legacySseEndpoint, mediaType, type Exchange, type JsonObject, type Transport } from "./rpc.ts";
+import { McpSession, clip, isObject, legacySseEndpoint, mediaType, type Exchange, type JsonObject, type TokenSource, type Transport } from "./rpc.ts";
 import { RULES, judge, listOf, sentence } from "./rules.ts";
 
 /**
@@ -170,17 +170,16 @@ export function missingToolName(taken: Set<string>): string {
  * Runs the data-layer rules. `calls` are the developer's sample calls, made
  * as listed (even to a tool not marked read-only) on top of the check's own.
  */
-export async function checkDataLayer(transport: Transport, token?: string, calls: Required<ToolCall>[] = []): Promise<DataLayerFindings> {
+export async function checkDataLayer(transport: Transport, token?: TokenSource, calls: Required<ToolCall>[] = []): Promise<DataLayerFindings> {
   const session = new McpSession(transport, token);
   try {
-    return await gather(session, transport, token, calls);
+    return await gather(session, transport, Boolean(token), calls);
   } finally {
     await session.close();
   }
 }
 
-async function gather(session: McpSession, transport: Transport, token: string | undefined, calls: Required<ToolCall>[]): Promise<DataLayerFindings> {
-  const withToken = Boolean(token);
+async function gather(session: McpSession, transport: Transport, withToken: boolean, calls: Required<ToolCall>[]): Promise<DataLayerFindings> {
   const init = await session.initialize();
   if (!withToken && isRefusal(init)) {
     const note = `The server asks for sign-in (initialize was refused with HTTP ${init.status}); run again with a token to check the data layer.`;
@@ -193,7 +192,7 @@ async function gather(session: McpSession, transport: Transport, token: string |
   const e: Evidence = { withToken, init, listings: [], listed: calls.length > 0, judged: [], unknown: [], otherCalls: [], screens: [] };
   if (!resultOf(init)) {
     if (init.outcome.kind === "http" && init.status! >= 400 && init.status! < 500 && !isRefusal(init)) {
-      e.legacyEndpoint = await legacySseEndpoint(transport, token);
+      e.legacyEndpoint = await legacySseEndpoint(transport, session.bearer);
     }
     const note = "The initialize request didn't succeed (see DL-01), so this wasn't checked.";
     return {
@@ -322,7 +321,8 @@ function streamableHttp(e: Evidence): RuleResult {
       );
     }
     if (e.withToken && isRefusal(e.init)) {
-      return judge(rule, "FAIL", `The initialize request was refused with HTTP ${e.init.status} even with the token, so nothing else could be checked; check the token.`);
+      const again = e.init.renewed ? ", and again after refreshing it" : "";
+      return judge(rule, "FAIL", `The initialize request was refused with HTTP ${e.init.status} even with the token${again}, so nothing else could be checked; check the token.`);
     }
     const what = e.init.outcome.kind === "result" ? "a result that isn't an object" : describe(e.init, e.withToken);
     return judge(rule, "FAIL", `The initialize request failed: ${what}.`);

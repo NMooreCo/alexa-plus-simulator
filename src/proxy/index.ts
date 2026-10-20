@@ -28,8 +28,12 @@ export interface ProxyOptions {
   upstream: string;
   port: number;
   clientPort: number;
-  /** Sent upstream as `Authorization: Bearer <token>` on every request, when given. */
-  token?: string | (() => Promise<string | undefined>);
+  /**
+   * Sent upstream as `Authorization: Bearer <token>` on every request, when
+   * given. A function is asked on every request, and asked again with the
+   * refused token after a 401, so it can refresh it (the request is retried once).
+   */
+  token?: string | ((refused?: string) => Promise<string | undefined>);
   /** Extra headers sent upstream on every request. */
   headers?: Record<string, string>;
   verbose?: boolean;

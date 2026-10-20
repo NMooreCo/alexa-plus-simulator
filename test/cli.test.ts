@@ -6,14 +6,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startExample } from "../examples/tasks/server.mjs";
 import { examplePhrases, type Io, main, withRules } from "../src/run.ts";
 import type { ReadinessReport, RuleResult } from "../src/shared/contract.ts";
+import { FakeAuth } from "./fake-auth.ts";
 
-function capture(env: Record<string, string | undefined> = {}) {
+function capture(env: Record<string, string | undefined> = {}, openBrowser?: (url: string) => unknown) {
   const out: string[] = [];
   const err: string[] = [];
   let stop!: () => void;
   let started!: (urls: { url: string; uiUrl: string }) => void;
   const running = new Promise<{ url: string; uiUrl: string }>((r) => (started = r));
-  const io: Io = { out: (l) => out.push(l), err: (l) => err.push(l), env, stopped: new Promise<void>((r) => (stop = r)), started };
+  const io: Io = { out: (l) => out.push(l), err: (l) => err.push(l), env, stopped: new Promise<void>((r) => (stop = r)), started, ...(openBrowser ? { openBrowser } : {}) };
   return { io, out, err, stop, running };
 }
 
@@ -170,6 +171,58 @@ describe("the command line", () => {
     expect(run.out.join("\n")).toContain("FAIL");
     const missing = capture();
     expect(await main(["validate", join(dir, "nope.json")], missing.io)).toBe(2);
+  });
+});
+
+describe("signing in from the command line", () => {
+  let auth: FakeAuth;
+  beforeAll(async () => {
+    auth = await FakeAuth.start({ registration: true });
+  });
+  afterAll(() => auth.close());
+
+  it("links, then checks and simulates with the token file", async () => {
+    const file = join(await mkdtemp(join(tmpdir(), "alexa-sim-")), ".alexa-plus-simulator", "tokens.json");
+    // The fake plays the browser, so no real one opens.
+    const linking = capture({}, (url) => auth.browse(url));
+    expect(await main(["link", auth.mcpUrl, "--callback-port", "0", "--token-file", file], linking.io)).toBe(0);
+    expect(linking.out).toContain(`  alexa-plus-simulator check ${auth.mcpUrl} --token-file ${file}`);
+    const saved = JSON.parse(await readFile(file, "utf8")) as { accessToken: string };
+    expect(linking.out.join("\n")).not.toContain(saved.accessToken);
+
+    const checking = capture();
+    await main(["check", auth.mcpUrl, "--token-file", file, "--json"], checking.io);
+    const report = JSON.parse(checking.out.join("\n")) as ReadinessReport;
+    expect(report.rules.find((r) => r.id === "DL-01")!.status).toBe("PASS");
+    expect(report.rules.find((r) => r.id === "AU-09")!.status).toBe("PASS");
+
+    const sim = capture({});
+    const done = main([auth.mcpUrl, "--server-port", "0", "--client-port", "0", "--token-file", file], sim.io);
+    const { url } = await sim.running;
+    try {
+      const listed = await fetch(`${url}/mcp`, { method: "POST", headers: ACCEPT, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+      expect(listed.status).toBe(200);
+      expect(sim.out).toContain(`  Sign-in:   ${file}, refreshed as it expires`);
+    } finally {
+      sim.stop();
+      expect(await done).toBe(0);
+    }
+  });
+
+  it("says what's wrong with how a token file was given", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
+    const missing = join(dir, "tokens.json");
+    const both = capture();
+    expect(await main(["check", auth.mcpUrl, "--token-file", missing, "--token", "abc"], both.io)).toBe(2);
+    expect(both.err[0]).toBe("Use --token or --token-file, not both.");
+    const none = capture();
+    expect(await main(["check", auth.mcpUrl, "--token-file", missing], none.io)).toBe(2);
+    expect(none.err[0]).toBe(`There's no token file at ${missing}. Sign in first: alexa-plus-simulator link ${auth.mcpUrl} --token-file ${missing}`);
+    const token = capture();
+    expect(await main(["link", auth.mcpUrl, "--token", "abc"], token.io)).toBe(2);
+    const refused = capture();
+    expect(await main(["link", "http://example.com/mcp", "--token-file", missing], refused.io)).toBe(1);
+    expect(refused.err[0]).toContain("Refusing the MCP server's URL, http://example.com/mcp: it must use https://");
   });
 });
 

@@ -3,6 +3,7 @@ import { checkAuth, probeSignIn } from "./auth.ts";
 import { parseCalls, type ToolCall } from "./calls.ts";
 import { checkDataLayer } from "./data-layer.ts";
 import { buildReport } from "./report.ts";
+import { tokenSource, type TokenSource } from "./rpc.ts";
 
 /**
  * The readiness check: Amazon's published Alexa+ MCP add-on requirements
@@ -14,6 +15,7 @@ export { buildReport, formatReport, verdictOf, VERSION } from "./report.ts";
 export { validatePackage } from "./package.ts";
 export { RULES } from "./rules.ts";
 export { MAX_CALLS, parseCalls, type ToolCall } from "./calls.ts";
+export type { RefreshOutcome, TokenSource } from "./rpc.ts";
 
 /** Long enough for a cold start, short enough that a hung server fails a rule rather than stalling the check. */
 export const DEFAULT_TIMEOUT_MS = 10_000;
@@ -21,8 +23,12 @@ export const DEFAULT_TIMEOUT_MS = 10_000;
 export interface CheckOptions {
   /** The MCP endpoint, like https://example.com/mcp. */
   serverUrl: string;
-  /** A bearer token for a server that needs one, to check the authenticated calls too. */
-  token?: string;
+  /**
+   * A bearer token for a server that needs one, to check the authenticated
+   * calls too: a fixed one, or a source that refreshes it (link's token file),
+   * which also lets AU-09 confirm refreshing works.
+   */
+  token?: string | TokenSource;
   /**
    * Sample calls to make, with arguments, as a calls file lists them. Each is
    * made even when its tool isn't marked read-only (the developer chose it), and
@@ -49,6 +55,7 @@ export async function runChecks(options: CheckOptions): Promise<ReadinessReport>
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new TypeError(`${options.serverUrl} isn't an http:// or https:// URL.`);
   // Checked before anything is sent, so a bad list never leaves the check half done.
   const calls = options.calls === undefined ? [] : parseCalls(options.calls);
+  const token = tokenSource(options.token);
 
   const transport = {
     url: options.serverUrl,
@@ -57,9 +64,10 @@ export async function runChecks(options: CheckOptions): Promise<ReadinessReport>
     now: options.now ?? (() => performance.now()),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
-  const dataLayer = await checkDataLayer(transport, options.token, calls);
+  const dataLayer = await checkDataLayer(transport, token, calls);
   // Without a token the data layer's own requests show whether sign-in is needed; with one, ask again without it.
-  const signIn = options.token ? await probeSignIn(transport, dataLayer.probe) : dataLayer.signIn;
-  const auth = await checkAuth(transport, options.serverUrl, signIn);
+  const signIn = token ? await probeSignIn(transport, dataLayer.probe) : dataLayer.signIn;
+  const refresh = await token?.confirmRefresh?.();
+  const auth = await checkAuth(transport, options.serverUrl, signIn, refresh);
   return buildReport(options.serverUrl, [...dataLayer.rules, ...auth], options.version ? { version: options.version } : {});
 }

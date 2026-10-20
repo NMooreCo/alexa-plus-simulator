@@ -135,11 +135,12 @@ describe("the house style", () => {
   // Built from its code point so this file doesn't contain the character it looks for.
   const EM_DASH = String.fromCharCode(0x2014);
 
-  it("has no em dashes in the check, its tests or its fixtures", () => {
+  it("has no em dashes in the check, link, their tests or their fixtures", () => {
     const files = [
       ...readdirSync(new URL("../src/check/", import.meta.url)).map((f) => new URL(`../src/check/${f}`, import.meta.url)),
+      ...readdirSync(new URL("../src/link/", import.meta.url)).map((f) => new URL(`../src/link/${f}`, import.meta.url)),
       ...readdirSync(new URL("./", import.meta.url))
-        .filter((f) => f.startsWith("check") || f === "fakes.ts")
+        .filter((f) => f.startsWith("check") || f.startsWith("link") || f === "fakes.ts" || f === "fake-auth.ts")
         .map((f) => new URL(`./${f}`, import.meta.url)),
       new URL("./fixtures/addon.json", import.meta.url),
     ];

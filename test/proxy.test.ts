@@ -154,6 +154,38 @@ describe("POST /mcp", () => {
     expect(fake.seen.map((seen) => seen.headers.authorization)).toEqual(["Bearer token-1", "Bearer token-2", "Bearer token-3"]);
   });
 
+  it("asks the token function again after a 401, with the refused token, and sends the request once more", async () => {
+    const asked: (string | undefined)[] = [];
+    const proxy = await launch({
+      token: async (refused) => {
+        asked.push(refused);
+        return refused ? "fresh-token" : "stale-token";
+      },
+    });
+    fake.failNext = { status: 401 };
+    const reply = await post(proxy, rpc("tools/list", undefined, "t1"));
+    expect(reply.status).toBe(200);
+    expect(reply.json()).toMatchObject({ id: "t1", result: { tools: TOOLS } });
+    expect(asked).toEqual([undefined, "stale-token"]);
+    expect(fake.seen.map((seen) => seen.headers.authorization)).toEqual(["Bearer stale-token", "Bearer fresh-token"]);
+    expect(fake.seen[1]?.body).toBe(fake.seen[0]?.body);
+    // The traffic log shows the request that went through.
+    expect(proxy.state().rpc.at(-1)).toMatchObject({ id: "t1", status: 200 });
+  });
+
+  it("passes a 401 back as it came when the token function has nothing new, or the token was the caller's", async () => {
+    const same = await launch({ token: async () => "same-token" });
+    fake.failNext = { status: 401 };
+    expect((await post(same, rpc("tools/list"))).status).toBe(401);
+    expect(fake.seen).toHaveLength(1);
+
+    fake.reset();
+    const callers = await launch({ token: async () => undefined });
+    fake.failNext = { status: 401 };
+    expect((await post(callers, rpc("tools/list"), { authorization: "Bearer callers-token" })).status).toBe(401);
+    expect(fake.seen).toHaveLength(1);
+  });
+
   it("sends no Authorization when the token function has none", async () => {
     const proxy = await launch({ token: async () => undefined });
     await post(proxy, rpc("ping"));

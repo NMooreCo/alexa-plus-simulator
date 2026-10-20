@@ -24,6 +24,35 @@ export interface Transport {
   timeoutMs: number;
 }
 
+/** How a refresh of a saved sign-in went, for AU-09. */
+export type RefreshOutcome =
+  | { status: "refreshed"; sameAccessToken: boolean; newRefreshToken: boolean }
+  | { status: "failed"; problem: string }
+  /** There was no refresh token to refresh with. */
+  | { status: "missing" }
+  /** Something on this side kept the refresh from being tried, like a client secret that isn't set. */
+  | { status: "untried"; reason: string };
+
+/**
+ * A bearer token that can change while the check runs, like the token file
+ * `link` saves: it refreshes itself before it expires, and once more when
+ * the server refuses it.
+ */
+export interface TokenSource {
+  /** The token to send now. Rejects when there's no usable one, which stops the check: that's a setup problem, not the server's. */
+  token(): Promise<string>;
+  /** Called after the server refused `rejected` with 401: a new token to send the request with once more, or undefined. */
+  renew?(rejected: string): Promise<string | undefined>;
+  /** For AU-09: how refreshing went, refreshing now when it hasn't come up yet. */
+  confirmRefresh?(): Promise<RefreshOutcome>;
+}
+
+/** A plain token as a source, or undefined for none, so the session handles one shape. */
+export function tokenSource(token: string | TokenSource | undefined): TokenSource | undefined {
+  if (typeof token !== "string") return token;
+  return token ? { token: async () => token } : undefined;
+}
+
 export interface JsonRpcError {
   code?: number;
   message: string;
@@ -52,6 +81,8 @@ export interface Exchange {
   outcome: Outcome;
   /** How the answer came back. */
   framing?: "json" | "sse";
+  /** The token was refused with 401, renewed and sent again; this is the second answer. */
+  renewed?: boolean;
 }
 
 export type JsonObject = Record<string, unknown>;
@@ -173,15 +204,20 @@ function isServerRequest(message: unknown): message is { id: string | number; me
 export class McpSession {
   sessionId: string | undefined;
   protocolVersion: string | undefined;
+  /** The bearer token the latest request carried. */
+  bearer: string | undefined;
   private sequence = 0;
   // String ids, as Alexa+ sends ("4e3bdaee-0"), so a server that assumes numbers shows it.
   private readonly idPrefix = randomHex(8);
   private readonly replies = new Set<Promise<void>>();
+  private readonly tokens: TokenSource | undefined;
 
   constructor(
     private readonly transport: Transport,
-    private readonly token?: string,
-  ) {}
+    token?: string | TokenSource,
+  ) {
+    this.tokens = tokenSource(token);
+  }
 
   async initialize(): Promise<Exchange> {
     const exchange = await this.request("initialize", ALEXA_INITIALIZE_PARAMS);
@@ -193,9 +229,25 @@ export class McpSession {
     return exchange;
   }
 
+  /**
+   * Sends a request and reads its answer. A token the server refuses with 401
+   * is renewed once (a token file refreshes) and the request sent again, timed
+   * afresh, since a refresh is the sign-in's cost, not the server's latency.
+   */
   async request(method: string, params?: unknown, label = method): Promise<Exchange> {
     const id = `${this.idPrefix}-${this.sequence++}`;
     const message = { jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) };
+    // Not caught, unlike a failed send: a token source that can't give a token stops the check rather than failing a rule.
+    if (this.tokens) this.bearer = await this.tokens.token();
+    const exchange = await this.send(method, label, message, id);
+    if (exchange.status !== 401 || !this.bearer || !this.tokens?.renew) return exchange;
+    const fresh = await this.tokens.renew(this.bearer);
+    if (!fresh || fresh === this.bearer) return exchange;
+    this.bearer = fresh;
+    return { ...(await this.send(method, label, message, id)), renewed: true };
+  }
+
+  private async send(method: string, label: string, message: unknown, id: string): Promise<Exchange> {
     const deadline = new Deadline(this.transport.timeoutMs);
     const started = this.transport.now();
     const elapsed = () => this.transport.now() - started;
@@ -217,6 +269,7 @@ export class McpSession {
   /** Sends a notification; servers answer 202 Accepted with no body. */
   async notify(method: string, params?: unknown): Promise<Exchange> {
     const message = { jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) };
+    if (this.tokens) this.bearer = await this.tokens.token();
     const deadline = new Deadline(this.transport.timeoutMs);
     const started = this.transport.now();
     try {
@@ -262,7 +315,7 @@ export class McpSession {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
     };
-    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    if (this.bearer) headers.Authorization = `Bearer ${this.bearer}`;
     if (this.sessionId) headers["Mcp-Session-Id"] = this.sessionId;
     if (this.protocolVersion) headers["Mcp-Protocol-Version"] = this.protocolVersion;
     return headers;
