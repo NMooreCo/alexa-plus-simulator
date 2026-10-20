@@ -37,15 +37,16 @@
   "scripts": {
     "build": "vite build && vite build --config vite.server.config.ts && vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "start": "node dist/server/cli.js",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.ui.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.ui.json && tsc -p tsconfig.e2e.json",
     "test": "vitest run",
+    "test:e2e": "pnpm build && playwright test",
     "check": "pnpm build && pnpm typecheck && vitest run",
     "example": "node examples/tasks/server.mjs",
     "prepublishOnly": "pnpm check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
-"aws4fetch": "1.0.20",
+    "aws4fetch": "1.0.20",
     "playwright-core": "1.63.0"
   },
   "devDependencies": {
@@ -53,6 +54,7 @@
     "@modelcontextprotocol/core": "2.3.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@modelcontextprotocol/server": "2.3.1",
+    "@playwright/test": "1.63.0",
     "@types/node": "22",
     "fast-check": "4.10.2",
     "typescript": "7.0.2",

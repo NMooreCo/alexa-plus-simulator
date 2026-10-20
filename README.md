@@ -211,6 +211,17 @@ pnpm install
 pnpm check   # build, typecheck and tests
 ```
 
+### Browser tests
+
+`pnpm test:e2e` builds, starts the example server and the CLI on test ports (6374 to 6383), and drives the simulator's page with Playwright: tools, screens, devices, traffic, the readiness check, talking (to a stand-in for the Claude API, so no key is needed), an extension, the library hosted in a page of its own, and a phone's width. It uses Playwright's own Chromium (`pnpm exec playwright install chromium` downloads it once). To use Edge or Chrome as installed instead, with nothing to download, set `PW_CHANNEL`:
+
+```bash
+PW_CHANNEL=msedge pnpm test:e2e            # macOS, Linux, Git Bash
+$env:PW_CHANNEL="msedge"; pnpm test:e2e    # Windows PowerShell
+```
+
+When something else holds one of those ports, move it with the variables in [test/e2e/addresses.ts](test/e2e/addresses.ts).
+
 ## License
 
 MIT
