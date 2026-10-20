@@ -44,7 +44,8 @@
     "prepublishOnly": "pnpm check"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0"
+    "@anthropic-ai/sdk": "^0.135.0",
+    "aws4fetch": "1.0.20"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",
