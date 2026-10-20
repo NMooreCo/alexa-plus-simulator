@@ -80,8 +80,8 @@ blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--lin
 summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 a { color: inherit; }
 .shots { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
-figure { margin: 0; max-width: 100%; }
-figure img { display: block; max-width: min(480px, 100%); height: auto; border: 1px solid var(--line); border-radius: 8px; background: #000; }
+figure { margin: 0; width: min(340px, 100%); }
+figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #000; }
 figcaption { margin-top: 4px; color: var(--muted); font-size: 13px; }
 </style>
 </head>

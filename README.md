@@ -10,6 +10,13 @@ npx alexa-plus-simulator https://your-server.example.com/mcp
 
 Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` to talk to it; without one you can still call every tool by hand and run the readiness check.
 
+![The simulator: a to-do list add-on's screen on a simulated Echo Show 8, the spoken answer captioned, and the conversation beside it](docs/images/simulator.png)
+
+| | | |
+|---|---|---|
+| ![The Readiness tab: every rule with Amazon's requirement](docs/images/readiness.png) | ![The Traffic tab: every MCP exchange, timed](docs/images/traffic.png) | ![An Echo Dot: no screen, so the answer is spoken](docs/images/dot.png) |
+| The readiness check | Every exchange, timed against 500 ms | An Echo Dot, voice only |
+
 ## What it does
 
 - **Simulates the device.** The page is an MCP client that connects the way Alexa+ says it does (protocol version `2025-03-26`, client `Alexa+ MCP Client`, `roots` capability), lists your tools and calls them. Pick an Echo Show 5, 8, 10, 15 or 21, or an Echo Dot with no screen at all.
@@ -23,7 +30,11 @@ Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` to talk to it; without 
 npx alexa-plus-simulator check https://your-server.example.com/mcp --out readiness-report.json
 ```
 
-It exits with 1 when something fails, so it can gate a pull request.
+It exits with 1 when something fails, so it can gate a pull request ([docs/ci.md](docs/ci.md)).
+
+- **Renders and judges your screens.** `check --visual` shows every screen on the Echo Show 5, 8 and 15 in a headless browser, saves a screenshot of each, and checks that it renders, fits, loads only what it declares and throws no errors; `--html` writes the whole report as a page to share.
+
+![The HTML report's screen rules and screenshots](docs/images/report-screens.png)
 
 - **Checks your package.** `validate addon.json` checks an add-on package against the quickstart's schema reference: lengths, example phrases, HTTPS links, image sizes and formats.
 
@@ -53,6 +64,10 @@ alexa-plus-simulator link <mcp-url> [options]  Sign in the way Alexa+ account li
 | `--open` | Open the simulator in the browser |
 | `--verbose` | Log every exchange |
 | `--out <file>` | `check`: also write the report as JSON |
+| `--html <file>` | `check`: also write the report as a page to share, with the screenshots |
+| `--visual` | `check`: show every screen on the Echo Show 5, 8 and 15 in a headless browser (Chrome, Edge or Chromium), and judge them |
+| `--screenshots <dir>` | `check --visual`: where the screenshots go (default `readiness-screenshots`) |
+| `--browser <name>` | `check --visual`: `chrome`, `msedge` or `chromium` (default: the first one installed) |
 | `--json` | `check`, `validate`: print JSON instead of a summary |
 
 `ANTHROPIC_API_KEY` turns on talking, and `ANTHROPIC_BASE_URL` points it at a gateway. The key stays on your machine: the page asks the simulator's own server, which asks Anthropic.
@@ -73,6 +88,10 @@ Each rule quotes the requirement it checks, with a link, in the report itself. O
 | DL-08 Screens | Each `_meta.ui.resourceUri`, on a tool or in a result, reads back as HTML (otherwise Alexa+ uses its data-only flow) |
 | AU-01 to AU-08 | For a server that needs sign-in: 401 or 403 without a token, no `WWW-Authenticate` header, protected resource metadata at the root path, authorization server metadata, PKCE with S256, the authorization and token endpoints, refresh tokens, and HTTPS |
 | AU-09 Token refresh | With a token file from `link`: a refresh with the saved refresh token returns a new access token |
+| VR-01 Renders on both surfaces | With `--visual`: every screen starts and shows something on the Echo Show 5, 8 and 15 |
+| VR-02 Fits the screen | No screen runs off the side of its device |
+| VR-03 Loads only what it declares | No screen loads from an origin its resource's `_meta.ui.csp` doesn't declare |
+| VR-04 No script errors | No screen logs or throws an error |
 | PK-01 to PK-14 | `addon.json` (with `--addon`, or `validate`): the manifest version, countries, name and description lengths, example phrases, HTTPS policy links, icon, carousel and banner sizes, the MCP integration and its HTTPS endpoint, and image formats |
 
 ## Testing tools that need arguments
@@ -141,9 +160,10 @@ Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) 
 
 - **The model is Claude, not Alexa's.** It follows your server's `instructions` and tool descriptions as a capable model would, with a short spoken style; Alexa+ may choose differently.
 - **The voice is your browser's.** Recognition and speech come from the Web Speech API.
-- **Amazon's full rubric isn't public.** The check covers what Amazon has published (quoted, with links, in [docs/alexa-requirements.md](docs/alexa-requirements.md)) and says so in every report. The verdicts are READY, CONDITIONAL and NOT_READY, so they can't be mistaken for Amazon's certification.
+- **Amazon's full rubric isn't public.** The check covers what Amazon has published (quoted, with links, in [docs/alexa-requirements.md](docs/alexa-requirements.md)) and says so in every report. The verdicts are READY, CONDITIONAL and NOT_READY, so they can't be mistaken for Amazon's certification. Amazon's inspector also judges visual, accessibility and UI quality rules it hasn't published; the screen check covers rendering, fit, declared loads and errors only.
+- **It hasn't been compared with Amazon's own tools,** which are partner-only. It follows their documentation; if you have access to both and they disagree, please open an issue.
 - **Sign-in runs on your machine.** `link` follows the account-linking flow the guide describes, but the sign-in comes back to `http://127.0.0.1` rather than Alexa's redirect URIs, with a client you made for testing (or one it registered), so it can't show how Amazon's own servers get on with your authorization server.
-- **Screens render in your browser** at the documented sizes, not on Echo hardware.
+- **Screens render in your browser's engine** at the documented sizes, not on Echo hardware.
 
 ## Try it without a server
 
@@ -155,9 +175,18 @@ node dist/server/cli.js http://127.0.0.1:6280/mcp --open
 
 `node examples/tasks/server.mjs --slow 700` makes every request slow, to see the budget warnings.
 
+## Documentation
+
+- [Using the check in CI](docs/ci.md): exit codes, a GitHub Actions job, and the report's format
+- [Extending it](docs/extensions.md): the hooks and the API
+- [Hosting it in your own page](docs/hosting.md): the library, the model route, and security
+- [Troubleshooting](docs/troubleshooting.md)
+- [How it fits together](docs/architecture.md)
+- [Amazon's requirements, quoted](docs/alexa-requirements.md)
+
 ## Development
 
-Node 22 or later and pnpm.
+Node 22 or later and pnpm. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 
 ```bash
 pnpm install
