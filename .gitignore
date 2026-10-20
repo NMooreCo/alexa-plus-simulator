@@ -5,3 +5,5 @@ dist/
 readiness-report.json
 inspection-summary.json
 *.log
+test-results/
+playwright-report/
