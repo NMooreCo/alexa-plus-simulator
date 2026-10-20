@@ -370,7 +370,7 @@ describe("the report", () => {
     expect(report.passCount + report.failCount + report.warnCount + report.skipCount).toBe(report.rules.length);
     expect(report.rules.map((r) => r.id)).toEqual([
       "DL-01", "DL-02", "DL-03", "DL-04", "DL-05", "DL-06", "DL-07", "DL-08",
-      "AU-01", "AU-02", "AU-03", "AU-04", "AU-05", "AU-06", "AU-07", "AU-08",
+      "AU-01", "AU-02", "AU-03", "AU-04", "AU-05", "AU-06", "AU-07", "AU-08", "AU-09",
     ]);
   });
 

@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Browser, ConsoleMessage, Page } from "playwright-core";
-import { startProxy } from "../proxy/index.ts";
+import { type ProxyOptions, startProxy } from "../proxy/index.ts";
 import { DEVICES, type RuleResult, VERSION } from "../shared/contract.ts";
 
 /**
@@ -159,7 +159,8 @@ export function screenCalls(tools: ToolLike[], given: { tool: string; arguments?
 export interface ScreenCheckOptions {
   /** The MCP endpoint. */
   serverUrl: string;
-  token?: string | (() => Promise<string | undefined>);
+  /** A token, or a function the proxy asks for one (and again with a refused one, to refresh it). */
+  token?: ProxyOptions["token"];
   headers?: Record<string, string>;
   /** The simulator's built page. */
   uiDir: string;

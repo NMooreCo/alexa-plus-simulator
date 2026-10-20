@@ -1,12 +1,13 @@
 import type { RuleResult } from "../shared/contract.ts";
-import { challengeOf, isRefusal, missingToolName, type SignIn } from "./data-layer.ts";
-import { McpSession, clip, getJson, isObject, type JsonObject, type Transport } from "./rpc.ts";
+import { challengeOf, isRefusal, missingToolName, type ProbeCall, type SignIn } from "./data-layer.ts";
+import { McpSession, clip, getJson, isObject, type JsonObject, type RefreshOutcome, type Transport } from "./rpc.ts";
 import { RULES, judge, listOf } from "./rules.ts";
 
 /**
  * The authentication rules (AU-xx), for servers that refuse a request sent
  * without a token: the refusal itself, then the discovery documents Alexa+
- * reads when account linking is set up, then what they promise.
+ * reads when account linking is set up, then what they promise, then (with a
+ * token file from link) whether a refresh actually works.
  */
 
 export const AUTH_RULES = [
@@ -18,15 +19,17 @@ export const AUTH_RULES = [
   RULES.endpoints,
   RULES.refreshTokens,
   RULES.https,
+  RULES.tokenRefresh,
 ];
 
 /**
  * With a token, the data layer runs signed in, so this asks again without
  * one: initialize, then tools/list, then a tool call, since Amazon's account
  * linking guide expects a refusal "when a tool is called without a valid
- * token" and some servers only guard the calls.
+ * token" and some servers only guard the calls. The call is a read-only one
+ * the data layer made, so making it again unsigned can't change anything.
  */
-export async function probeSignIn(transport: Transport, toolName: string | undefined): Promise<SignIn> {
+export async function probeSignIn(transport: Transport, probe: ProbeCall | undefined): Promise<SignIn> {
   const session = new McpSession(transport);
   try {
     const init = await session.initialize();
@@ -36,8 +39,9 @@ export async function probeSignIn(transport: Transport, toolName: string | undef
     const list = await session.request("tools/list");
     if (isRefusal(list)) return { challenge: challengeOf(list) };
     // A tool that doesn't exist when there's no read-only one: either way nothing can change.
-    const name = toolName ?? missingToolName(new Set());
-    const call = await session.request("tools/call", { name, arguments: {} }, `tools/call ${name}`);
+    const missing = missingToolName(new Set());
+    const { name, arguments: args, label } = probe ?? { name: missing, arguments: {}, label: missing };
+    const call = await session.request("tools/call", { name, arguments: args }, `tools/call ${label}`);
     return isRefusal(call) ? { challenge: challengeOf(call) } : {};
   } finally {
     await session.close();
@@ -85,11 +89,16 @@ export function authServerMetadataUrls(issuer: URL): string[] {
   return [`${root}${path}`, `${issuer.origin}${path}/.well-known/oauth-authorization-server`, root];
 }
 
-export async function checkAuth(transport: Transport, serverUrl: string, signIn: SignIn): Promise<RuleResult[]> {
+/**
+ * `refresh` is how refreshing a token file's sign-in went, when the check
+ * had one; it's judged even when the server doesn't refuse unsigned requests,
+ * since a server can guard tools the probe didn't try.
+ */
+export async function checkAuth(transport: Transport, serverUrl: string, signIn: SignIn, refresh?: RefreshOutcome): Promise<RuleResult[]> {
   const challenge = signIn.challenge;
   if (!challenge) {
     const note = signIn.unknown ?? "The server doesn't require sign-in (account linking is optional).";
-    return AUTH_RULES.map((rule) => judge(rule, "SKIP", note));
+    return [...AUTH_RULES.slice(0, -1).map((rule) => judge(rule, "SKIP", note)), tokenRefresh(refresh, note)];
   }
   const rules: RuleResult[] = [];
 
@@ -123,7 +132,41 @@ export async function checkAuth(transport: Transport, serverUrl: string, signIn:
   }
 
   rules.push(https(serverUrl, issuer, metadata));
+  rules.push(
+    tokenRefresh(
+      refresh,
+      "No token file was used, so no refresh was tried; sign in with alexa-plus-simulator link and check with --token-file to confirm refreshing works.",
+    ),
+  );
   return rules;
+}
+
+/** AU-09: a refresh with the refresh token link saved, the way Alexa+ keeps a customer signed in. */
+function tokenRefresh(outcome: RefreshOutcome | undefined, skipNote: string): RuleResult {
+  const rule = RULES.tokenRefresh;
+  switch (outcome?.status) {
+    case undefined:
+      return judge(rule, "SKIP", skipNote);
+    case "untried":
+      return judge(rule, "SKIP", `No refresh was tried: ${outcome.reason}.`);
+    case "missing":
+      return judge(
+        rule,
+        "FAIL",
+        "The token file has no refresh token: the token endpoint didn't return one when you linked, so customers would have to re-link whenever an access token expires.",
+      );
+    case "failed":
+      return judge(
+        rule,
+        "FAIL",
+        `A refresh with the saved refresh token failed: ${outcome.problem}. If that refresh token was revoked or has expired, link again and rerun the check; otherwise customers would have to re-link whenever an access token expires.`,
+      );
+    case "refreshed": {
+      if (outcome.sameAccessToken) return judge(rule, "PASS", "A refresh with the saved refresh token worked, though it returned the access token it already had.");
+      const rotated = outcome.newRefreshToken ? " and a new refresh token, both saved back to the token file" : ", saved back to the token file (the refresh token stays the same)";
+      return judge(rule, "PASS", `A refresh with the saved refresh token returned a new access token${rotated}.`);
+    }
+  }
 }
 
 async function protectedResource(

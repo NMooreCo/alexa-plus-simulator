@@ -10,7 +10,13 @@ import { readBody, sendJson } from "./web.ts";
  * recorded on the way through.
  */
 
-export type TokenSource = string | (() => Promise<string | undefined>);
+/**
+ * Where the bearer token comes from: a fixed one, or a function asked on every
+ * request. After the server refuses a token from the function with 401, the
+ * function is asked again with that token, so it can refresh it, and the
+ * request goes once more with what it gives back.
+ */
+export type TokenSource = string | ((refused?: string) => Promise<string | undefined>);
 
 /** Sent upstream so a server's logs can tell the simulator's traffic apart. */
 const USER_AGENT = "alexa-plus-simulator";
@@ -46,8 +52,9 @@ export class McpForwarder {
     const batch = parsed?.batch ?? false;
 
     let headers: OutgoingHttpHeaders;
+    let token: string | undefined;
     try {
-      headers = await this.headersFor(request, POST_ACCEPT);
+      ({ headers, token } = await this.headersFor(request, POST_ACCEPT));
     } catch (error) {
       const exchange = this.recorder.begin(parsed, false);
       exchange.fail(500, (error as Error).message);
@@ -58,7 +65,7 @@ export class McpForwarder {
     const exchange = this.recorder.begin(parsed, Boolean(headers.authorization));
     let reply: IncomingMessage;
     try {
-      reply = await this.upstream.send("POST", headers, body, signal);
+      reply = await this.send("POST", headers, token, body, signal);
     } catch (error) {
       if (signal.aborted) {
         exchange.end("aborted");
@@ -133,7 +140,8 @@ export class McpForwarder {
   ): Promise<IncomingMessage | undefined> {
     const signal = watchCaller(response);
     try {
-      return await this.upstream.send(method, await this.headersFor(request, accept), undefined, signal);
+      const { headers, token } = await this.headersFor(request, accept);
+      return await this.send(method, headers, token, undefined, signal);
     } catch (error) {
       if (signal.aborted) return undefined;
       const local = error instanceof TokenFailure;
@@ -145,11 +153,34 @@ export class McpForwarder {
   }
 
   /**
+   * Sends upstream. A 401 for a token the token function gave gets one more
+   * try: the function hears which token was refused, so it can refresh, and
+   * the request goes again with the new one. Anything else, including a 401
+   * for a caller's own Authorization, passes back as it came.
+   */
+  private async send(method: string, headers: OutgoingHttpHeaders, token: string | undefined, body: Buffer | undefined, signal: AbortSignal): Promise<IncomingMessage> {
+    const reply = await this.upstream.send(method, headers, body, signal);
+    if (reply.statusCode !== 401 || !token || typeof this.token !== "function") return reply;
+    let fresh: string | undefined;
+    try {
+      fresh = await this.token(token);
+    } catch {
+      // The server's refusal is the answer the caller should see; the function reports its own trouble.
+      return reply;
+    }
+    if (!fresh || fresh === token) return reply;
+    reply.resume();
+    this.log?.(`${method} /mcp was refused with 401; sending it again with a refreshed token`);
+    return this.upstream.send(method, { ...headers, authorization: `Bearer ${fresh}` }, body, signal);
+  }
+
+  /**
    * The headers for the server: what the caller sent that the server needs,
    * then the configured extra headers, then the configured token, which wins
-   * over any Authorization the caller sent.
+   * over any Authorization the caller sent. Also the token itself, when there
+   * is one, so a refusal of it can be retried.
    */
-  private async headersFor(request: IncomingMessage, accept: string | undefined): Promise<OutgoingHttpHeaders> {
+  private async headersFor(request: IncomingMessage, accept: string | undefined): Promise<{ headers: OutgoingHttpHeaders; token?: string }> {
     const headers: OutgoingHttpHeaders = { "user-agent": USER_AGENT };
     for (const [name, value] of Object.entries(request.headers)) {
       // Every Mcp-* header passes, not only the session id and protocol version: newer MCP
@@ -168,7 +199,7 @@ export class McpForwarder {
     if (accept) headers.accept = accept;
     // The reply has to stay readable for the recording, so it mustn't come compressed.
     headers["accept-encoding"] = "identity";
-    return headers;
+    return token ? { headers, token } : { headers };
   }
 
   private unreachable(error: unknown): string {

@@ -16,6 +16,7 @@ Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` to talk to it; without 
 - **Talks.** Claude stands in for Alexa+'s own model: it decides what to say and which of your tools to call, and the page speaks the answer. Talk with the microphone (Chrome or Edge), turn on hands-free and start with "Alexa", or type. When it asks you a question, it listens for the answer.
 - **Shows your screens.** A tool with `_meta.ui.resourceUri` gets its MCP Apps screen on the device, sized for the Small (10" and below) or Large (11" and above) surface. Screens run under the Content Security Policy their resource declares in `_meta.ui.csp`, as the MCP Apps standard has a host do, and anything the policy blocks shows up in the log with the line to add.
 - **Records the traffic.** Every JSON-RPC exchange, with its timing; anything at 500 ms or more is flagged.
+- **Signs in.** For a server that needs sign-in, `link` runs Alexa+'s account linking on your machine and saves the tokens, which the simulator and the check then use and refresh. See [Servers that need sign-in](#servers-that-need-sign-in).
 - **Checks readiness.** The transport, protocol version, tools, latency, results, errors, screens and, for a server that needs sign-in, the account-linking setup, each tied to the published requirement it checks. From the page, or from the command line for CI:
 
 ```bash
@@ -32,13 +33,18 @@ It exits with 1 when something fails, so it can gate a pull request.
 alexa-plus-simulator <mcp-url> [options]       Talk to your MCP server on a simulated Echo
 alexa-plus-simulator check <mcp-url> [options] Check it against Alexa+'s published requirements
 alexa-plus-simulator validate <addon.json>     Check an add-on package's addon.json
+alexa-plus-simulator link <mcp-url> [options]  Sign in the way Alexa+ account linking does, saving tokens for --token-file
 ```
 
 | Option | |
 |---|---|
 | `--token <token>` | A bearer token for a server that needs sign-in (or set `MCP_TOKEN`), sent on every request |
+| `--token-file <file>` | The tokens `link` saved, sent like `--token` and refreshed as they expire (not with `--token`); for `link`, where to save them (default `.alexa-plus-simulator/tokens.json`) |
+| `--client-id <id>` | `link`: a client you made, with its secret, if it has one, in `ALEXA_SIM_CLIENT_SECRET` |
+| `--callback-port <port>` | `link`: where the sign-in comes back, `http://127.0.0.1:<port>/callback` (default 6278) |
 | `--header "Name: value"` | Another header on every request to the server (repeatable) |
 | `--addon <addon.json>` | Your add-on package: its example phrases become suggestions, and the check includes it |
+| `--calls <calls.json>` | Sample calls for the check to make, with arguments; see [Testing tools that need arguments](#testing-tools-that-need-arguments) |
 | `--extension <file.js>` | An extension for the page (repeatable); see [Extending it](#extending-it) |
 | `--server-port <port>` | The proxy's port (default 6277) |
 | `--client-port <port>` | The page's port (default 6274) |
@@ -53,20 +59,56 @@ alexa-plus-simulator validate <addon.json>     Check an add-on package's addon.j
 
 ## The readiness rules
 
-Each rule quotes the requirement it checks, with a link, in the report itself. The check only ever calls tools marked `readOnlyHint: true` that need no arguments, plus a made-up tool name to see how errors come back.
+Each rule quotes the requirement it checks, with a link, in the report itself. On its own, the check only calls tools marked `readOnlyHint: true` that need no arguments, plus a made-up tool name to see how errors come back; it makes any other call only when you list it with `--calls`.
 
 | Rule | Checks |
 |---|---|
 | DL-01 Streamable HTTP | `initialize` as Alexa+ sends it succeeds (a server that only speaks the legacy HTTP+SSE transport fails) |
 | DL-02 Protocol version | The server negotiates `2025-03-26`, the version Alexa+ asks for |
 | DL-03 Tool definitions | Every tool has a name, a description and an object `inputSchema` |
-| DL-04 Latency under 500 ms | `initialize`, listing, each screen and each read-only tool, timed; the median must be under 500 ms, and each slow request is named |
-| DL-05 Tool results | A tool's result has text and `structuredContent`, as Amazon's documented result does |
+| DL-04 Latency under 500 ms | `initialize`, listing, each screen, each read-only tool and each listed call, timed; the median must be under 500 ms, and each slow request is named |
+| DL-05 Tool results | Each result the check gets (from its own pick and every listed call) has text and `structuredContent`, as Amazon's documented result does |
 | DL-06 Error handling | A call to a tool that doesn't exist gets a JSON-RPC error or `isError`, never a 5xx, a hang or HTML |
 | DL-07 Repeated calls | The same read-only call twice returns the same result |
-| DL-08 Screens | Each `_meta.ui.resourceUri` reads back as HTML (otherwise Alexa+ uses its data-only flow) |
+| DL-08 Screens | Each `_meta.ui.resourceUri`, on a tool or in a result, reads back as HTML (otherwise Alexa+ uses its data-only flow) |
 | AU-01 to AU-08 | For a server that needs sign-in: 401 or 403 without a token, no `WWW-Authenticate` header, protected resource metadata at the root path, authorization server metadata, PKCE with S256, the authorization and token endpoints, refresh tokens, and HTTPS |
+| AU-09 Token refresh | With a token file from `link`: a refresh with the saved refresh token returns a new access token |
 | PK-01 to PK-14 | `addon.json` (with `--addon`, or `validate`): the manifest version, countries, name and description lengths, example phrases, HTTPS policy links, icon, carousel and banner sizes, the MCP integration and its HTTPS endpoint, and image formats |
+
+## Testing tools that need arguments
+
+The check can't guess arguments, and on its own it never calls a tool that might change something, so when every tool needs arguments, DL-05 and DL-07 are skipped. List sample calls in a file:
+
+```json
+[
+  { "tool": "get_forecast", "arguments": { "city": "Denver" } },
+  { "tool": "add_task", "arguments": { "text": "Bring the hose in" } }
+]
+```
+
+```bash
+npx alexa-plus-simulator check https://your-server.example.com/mcp --calls calls.json
+```
+
+Each listed call is made as written, even to a tool that isn't marked read-only: you chose it for your own server, so point the check at test data. Its round trip counts toward latency (DL-04), its result is judged and named (DL-05), and a screen its result names is read (DL-08). A call to a read-only tool is made twice to compare the results (DL-07); any other call is made once. A tool you don't list is still only called when it's read-only and needs no arguments, and a listed tool the server doesn't list isn't called at all. The simulator takes `--calls` too, for the check on its page.
+
+## Servers that need sign-in
+
+Alexa+ signs customers in to your server with account linking: the OAuth 2.1 authorization code flow with PKCE, against the authorization server your server names. `link` runs that flow on your machine, so you get a token instead of bringing one:
+
+```bash
+npx alexa-plus-simulator link https://your-server.example.com/mcp --client-id your-test-client
+npx alexa-plus-simulator check https://your-server.example.com/mcp --token-file .alexa-plus-simulator/tokens.json
+npx alexa-plus-simulator https://your-server.example.com/mcp --token-file .alexa-plus-simulator/tokens.json
+```
+
+`link` discovers what Alexa+ discovers: the protected resource metadata at `/.well-known/oauth-protected-resource` on your server's origin, the authorization server it names, and that server's metadata, which must list `S256` in `code_challenge_methods_supported` (Amazon blocks deployment without it, and `link` stops there too). It opens your browser to sign in, with a PKCE challenge, the `resource` parameter set to your MCP URL and the scopes your protected resource metadata lists, takes the code back at `http://127.0.0.1:6278/callback`, and saves the tokens to `.alexa-plus-simulator/tokens.json`. The folder gets a `.gitignore`, and on macOS and Linux the file is readable only by you (mode 0600). It prints the sign-in address too, in case the browser doesn't open, and gives up after five minutes.
+
+With `--token-file`, the check and the simulator send the saved access token, refresh it when it's a minute from expiring or once when the server answers 401, and save rotated tokens back to the file; when refreshing fails, they say to run `link` again. The check also confirms that a refresh works (AU-09), leaving out the `resource` parameter as Alexa+ does on a refresh.
+
+**The client.** Alexa+ doesn't register itself with your authorization server ("Dynamic Client Registration (DCR) isn't supported"). You make a client id and secret for it yourself, static client registration, with every one of Alexa's redirect URIs. Make one for `link` the same way, with `http://127.0.0.1:6278/callback` as its redirect URI (or `--callback-port` and your own), then give its id with `--client-id` and its secret in `ALEXA_SIM_CLIENT_SECRET`, an environment variable so it stays out of your shell history. The token file never holds that secret, so keep it set when you check or simulate. Without `--client-id`, `link` registers a client for testing when your authorization server has a `registration_endpoint`; that's a shortcut, not what Alexa+ does.
+
+**Why the root metadata matters.** RFC 9728, which MCP's authorization spec uses, puts the protected resource metadata for `https://your-server.example.com/mcp` at `/.well-known/oauth-protected-resource/mcp`. Amazon's account linking guide asks for it at exactly `/.well-known/oauth-protected-resource`, the root, and that's where Alexa+ reads it when you set up account linking. A server with only the path-specific document works with other MCP clients and not with Alexa+, so `link` falls back to it with a note, and the check's AU-03 fails until the root one is there.
 
 ## Extending it
 
@@ -100,7 +142,7 @@ Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) 
 - **The model is Claude, not Alexa's.** It follows your server's `instructions` and tool descriptions as a capable model would, with a short spoken style; Alexa+ may choose differently.
 - **The voice is your browser's.** Recognition and speech come from the Web Speech API.
 - **Amazon's full rubric isn't public.** The check covers what Amazon has published (quoted, with links, in [docs/alexa-requirements.md](docs/alexa-requirements.md)) and says so in every report. The verdicts are READY, CONDITIONAL and NOT_READY, so they can't be mistaken for Amazon's certification.
-- **Sign-in is a token you supply.** The check reads your protected resource and authorization server metadata the way the account-linking guide describes, but it doesn't run Amazon's account-linking flow.
+- **Sign-in runs on your machine.** `link` follows the account-linking flow the guide describes, but the sign-in comes back to `http://127.0.0.1` rather than Alexa's redirect URIs, with a client you made for testing (or one it registered), so it can't show how Amazon's own servers get on with your authorization server.
 - **Screens render in your browser** at the documented sizes, not on Echo hardware.
 
 ## Try it without a server

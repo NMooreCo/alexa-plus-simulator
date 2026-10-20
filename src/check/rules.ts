@@ -35,6 +35,7 @@ export const RULES = {
   endpoints: define("AU-06", "auth", "Authorization and token endpoints", SOURCES.authorizationCodeFlow),
   refreshTokens: define("AU-07", "auth", "Refresh tokens", SOURCES.refreshTokens),
   https: define("AU-08", "auth", "HTTPS", SOURCES.https),
+  tokenRefresh: define("AU-09", "auth", "Token refresh", SOURCES.refreshTokens),
 
   manifestVersion: define("PK-01", "package", "Manifest version", SOURCES.manifestVersion),
   countries: define("PK-02", "package", "Distribution countries", SOURCES.distributionCountries),

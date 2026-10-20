@@ -47,6 +47,8 @@ const ALL_AUTH_PASS = {
   "AU-06": "PASS",
   "AU-07": "PASS",
   "AU-08": "PASS",
+  // Refreshing is only tried with a token file from link (test/link.test.ts).
+  "AU-09": "SKIP",
 };
 
 describe("a server that needs sign-in", () => {
