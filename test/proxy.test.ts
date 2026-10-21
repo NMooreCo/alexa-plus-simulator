@@ -130,6 +130,30 @@ describe("POST /mcp", () => {
     expect(fake.seen[0]?.headers).toMatchObject({ "mcp-method": "tools/call", "mcp-name": "echo", "mcp-param-text": "hi", "last-event-id": "event-41" });
   });
 
+  it("passes on the caller's own headers, an extension's say, but not the connection's, the page's, the browser's or its cookies", async () => {
+    const proxy = await launch({ headers: { "X-Api-Key": "from --header" } });
+    await post(proxy, rpc("ping"), {
+      "x-demo-passcode": "1234",
+      "accept-language": "en-US",
+      origin: pageOrigin(proxy),
+      referer: `${pageOrigin(proxy)}/`,
+      cookie: "another-local-app=its-session",
+      "sec-fetch-site": "same-site",
+      "sec-ch-ua": '"Chromium";v="141"',
+      connection: "keep-alive, x-this-hop",
+      "x-this-hop": "only here",
+      "proxy-authorization": "Basic cHJveHk6cHJveHk=",
+      "user-agent": "Mozilla/5.0",
+      "accept-encoding": "gzip, br",
+      "x-api-key": "from the caller",
+    });
+    const sent = fake.seen[0]!.headers;
+    expect(sent).toMatchObject({ "x-demo-passcode": "1234", "accept-language": "en-US", "user-agent": "alexa-plus-simulator", "accept-encoding": "identity", host: new URL(fake.url).host });
+    // --header wins over the caller's own.
+    expect(sent["x-api-key"]).toBe("from --header");
+    for (const name of ["origin", "referer", "cookie", "sec-fetch-site", "sec-ch-ua", "x-this-hop", "proxy-authorization"]) expect(sent[name], name).toBeUndefined();
+  });
+
   it("adds the configured bearer token, which wins over a caller's own", async () => {
     const proxy = await launch({ token: "secret-token" });
     await post(proxy, rpc("ping"));

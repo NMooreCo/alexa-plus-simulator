@@ -173,7 +173,7 @@ The simulator runs a local proxy between the page and your server, shaped like t
 
 | On the proxy (port 6277) | |
 |---|---|
-| `POST /mcp`, `GET /mcp`, `DELETE /mcp` | Forwarded to your server. Send `Accept: application/json` to get plain JSON even when the server answers with Server-Sent Events. |
+| `POST /mcp`, `GET /mcp`, `DELETE /mcp` | Forwarded to your server with the request's own headers (an extension's included), but for the connection's, the browser's (Origin, Referer, `Sec-*`) and its cookies. Send `Accept: application/json` to get plain JSON even when the server answers with Server-Sent Events. |
 | `GET /events` | Server-Sent Events: `connected`, `tools-discovered`, `resource-fetched`, `widget-html`, `tool-called`, `error`, and `rpc` for every exchange |
 | `GET /health` | `{"status":"ok"}` once the server has been initialized |
 | `GET /state` | Everything seen this session: tools, resources, calls, errors and recent exchanges |

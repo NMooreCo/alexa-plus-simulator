@@ -56,7 +56,7 @@ Every hook is optional. Where several extensions give one, headers, context and 
 
 | Hook | What it does |
 |---|---|
-| `headers(kind)` | Headers for every request of a kind, `"mcp"` or `"model"`, read afresh for each one |
+| `headers(kind)` | Headers for every request of a kind, `"mcp"` or `"model"`, read afresh for each one; with the CLI, its proxy passes the MCP ones on to your server |
 | `connected()` | The MCP connection is up (on start, and again after Reconnect). Runs before the home screen shows |
 | `reset()` | A new conversation started |
 | `beforeTurn()` | Lines the person's turn starts with, before what they said |

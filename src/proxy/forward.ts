@@ -22,8 +22,39 @@ export type TokenSource = string | ((refused?: string) => Promise<string | undef
 const USER_AGENT = "alexa-plus-simulator";
 /** Both reply forms Streamable HTTP allows, so the server answers the way it would answer Alexa. */
 const POST_ACCEPT = "application/json, text/event-stream";
-/** Request headers a server needs besides the Mcp-* ones: the body's type, where to resume a stream, and the caller's own credentials. */
-const PASSED_UP = new Set(["content-type", "last-event-id", "authorization"]);
+/**
+ * Request headers that stay at the proxy; every other header the caller sends
+ * (an extension's own, say) goes on to the server. These belong to the
+ * connection (hop-by-hop, as RFC 9110 has them), name the proxy or the page
+ * rather than the server (Host, Origin, Referer, the browser's Sec-* headers,
+ * a preflight's Access-Control-Request-*), carry the browser's cookies for
+ * localhost, which other local apps share, or are set here (the body's length,
+ * the encodings this can read, its own user agent).
+ */
+const KEPT_HERE = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "expect",
+  "host",
+  "origin",
+  "referer",
+  "cookie",
+  "content-length",
+  "accept-encoding",
+  "user-agent",
+]);
+const KEPT_PREFIXES = ["sec-", "access-control-request-"];
+
+/** Whether a request header goes on to the server, given the ones its Connection header names as this hop's own. */
+function passesUp(name: string, hopByHop: Set<string>): boolean {
+  return !KEPT_HERE.has(name) && !hopByHop.has(name) && !KEPT_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
 
 /** The configured token function failed: the proxy's problem, not the server's. */
 class TokenFailure extends Error {
@@ -175,17 +206,18 @@ export class McpForwarder {
   }
 
   /**
-   * The headers for the server: what the caller sent that the server needs,
-   * then the configured extra headers, then the configured token, which wins
-   * over any Authorization the caller sent. Also the token itself, when there
-   * is one, so a refusal of it can be retried.
+   * The headers for the server: what the caller sent, but for what stays at
+   * the proxy (KEPT_HERE), then the configured extra headers, then the
+   * configured token, which wins over any Authorization the caller sent. Also
+   * the token itself, when there is one, so a refusal of it can be retried.
    */
   private async headersFor(request: IncomingMessage, accept: string | undefined): Promise<{ headers: OutgoingHttpHeaders; token?: string }> {
     const headers: OutgoingHttpHeaders = { "user-agent": USER_AGENT };
+    const hopByHop = new Set((single(request.headers.connection) ?? "").split(",").map((name) => name.trim().toLowerCase()));
     for (const [name, value] of Object.entries(request.headers)) {
-      // Every Mcp-* header passes, not only the session id and protocol version: newer MCP
-      // revisions add per-request ones (Mcp-Method, Mcp-Name, Mcp-Param-*) that servers check.
-      if (value !== undefined && (PASSED_UP.has(name) || name.startsWith("mcp-"))) headers[name] = value;
+      // Every Mcp-* header passes along with the rest, newer MCP revisions' per-request ones (Mcp-Method, Mcp-Name,
+      // Mcp-Param-*) included, and so does anything an extension adds with its headers hook.
+      if (value !== undefined && passesUp(name, hopByHop)) headers[name] = value;
     }
     if (request.method === "POST" && headers["content-type"] === undefined) headers["content-type"] = "application/json";
     Object.assign(headers, this.extraHeaders);
