@@ -3,7 +3,8 @@ dist/
 .env
 .env.*
 readiness-report.json
-inspection-summary.json
+readiness.html
+readiness-screenshots/
 *.log
 test-results/
 playwright-report/
