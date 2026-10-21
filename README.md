@@ -179,7 +179,7 @@ The simulator runs a local proxy between the page and your server, shaped like t
 | `GET /state` | Everything seen this session: tools, resources, calls, errors and recent exchanges |
 | `POST /api/check` | The readiness report, as JSON |
 
-Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) and allow only the page's own origin. Your server must be `https://`, or `http://` on localhost.
+Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) and allow only the page's own origin. Your server must be `https://`, or `http://` on localhost, and the proxy follows its redirects only within its origin.
 
 ## How it differs from the real thing
 

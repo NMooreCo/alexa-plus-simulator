@@ -1,4 +1,8 @@
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
+// @ts-expect-error The example is plain JavaScript.
+import { startExample } from "../examples/tasks/server.mjs";
 import { DISCLAIMER, type ReadinessReport } from "../src/shared/contract.ts";
 import { runChecks, type CheckOptions } from "../src/check/index.ts";
 import { BOOKING_TOOL, FORECAST_TOOL, fakeServer, legacySseServer, sdkServer, type FakeTool } from "./fakes.ts";
@@ -412,5 +416,56 @@ describe("the report", () => {
     expect(server.sent).toEqual([]);
     const { rule } = await check(fakeServer(), { serverUrl: "http://127.0.0.1:8787/mcp", token: "t0ken" });
     expect(rule("DL-01").status).toBe("PASS");
+  });
+});
+
+/** A server on 127.0.0.1 that keeps every request's path and headers, answering each with what `answer` says. */
+async function recording(answer: (request: IncomingMessage, response: ServerResponse) => void) {
+  const seen: { path: string; headers: IncomingHttpHeaders }[] = [];
+  const server = createServer((request, response) => {
+    seen.push({ path: request.url ?? "", headers: request.headers });
+    answer(request, response);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const close = () =>
+    new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+  return { origin, seen, close };
+}
+
+describe("redirects, with the real fetch", () => {
+  it("follows one within the server's origin with the token and headers, and refuses one elsewhere, which hears nothing", async () => {
+    const example = (await startExample({ port: 0 })) as { url: string; close: () => Promise<void> };
+    const elsewhere = await recording((_, response) => response.writeHead(404).end());
+    // The server: /old moves to /mcp, /away moves to another origin, and /mcp is the example's.
+    const server = await recording((request, response) => {
+      if (request.url === "/old") return void response.writeHead(307, { location: "/mcp" }).end();
+      if (request.url === "/away") return void response.writeHead(307, { location: `${elsewhere.origin}/mcp` }).end();
+      const target = new URL(example.url);
+      const forward = httpRequest({ host: target.hostname, port: target.port, method: request.method, path: target.pathname, headers: { ...request.headers, host: target.host } }, (answer) => {
+        response.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.pipe(response);
+      });
+      request.pipe(forward);
+    });
+    try {
+      const credentials = { token: "t0ken", headers: { "X-Api-Key": "key-1" } };
+      const moved = await runChecks({ serverUrl: `${server.origin}/old`, ...credentials });
+      expect(moved.rules.find((r) => r.id === "DL-01")!.status).toBe("PASS");
+      const mcp = server.seen.filter((s) => s.path === "/mcp");
+      expect(mcp.length).toBeGreaterThan(0);
+      // The headers on every request; the token on all but the token-less probe's.
+      for (const s of mcp) expect(s.headers["x-api-key"]).toBe("key-1");
+      expect(mcp[0]!.headers.authorization).toBe("Bearer t0ken");
+
+      const away = await runChecks({ serverUrl: `${server.origin}/away`, ...credentials });
+      expect(away.rules.find((r) => r.id === "DL-01")).toMatchObject({ status: "FAIL", notes: expect.stringContaining(`redirected to ${elsewhere.origin}/mcp, another origin, where the check won't send your token or headers`) });
+      expect(elsewhere.seen).toEqual([]);
+    } finally {
+      await Promise.all([server.close(), elsewhere.close(), example.close()]);
+    }
   });
 });

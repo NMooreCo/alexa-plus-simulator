@@ -18,7 +18,7 @@ const MAX_REDIRECTS = 5;
 /** The MCP endpoint under test: https://, or http:// on this machine only (src/shared/server-url.ts has the rule, which the check shares). */
 export { isLoopbackHost, parseServerUrl as parseUpstream };
 
-/** The server redirected somewhere the proxy won't send a request (plain http to another machine, say). */
+/** The server redirected to another origin, where the proxy won't send a request. */
 export class RedirectRefused extends Error {}
 
 export class Upstream {
@@ -33,27 +33,24 @@ export class Upstream {
   /**
    * Sends one request and resolves with the response once its headers are in.
    * Follows redirects a client would follow, since passing one back would send
-   * the caller around the proxy, straight to the server.
+   * the caller around the proxy, straight to the server; but only within the
+   * server's own origin. The proxy talks only to the server you named, and a
+   * redirect elsewhere would carry your token and headers (or the page's) to
+   * whoever the server pointed at, a service on this machine included.
    */
   async send(method: string, headers: OutgoingHttpHeaders, body: Buffer | undefined, signal: AbortSignal): Promise<IncomingMessage> {
     let url = this.url;
-    let sending = headers;
     for (let hop = 0; ; hop++) {
-      const response = await this.once(url, method, sending, body, signal);
+      const response = await this.once(url, method, headers, body, signal);
       const location = response.headers.location;
       const followable = (method === "GET" ? ANY_REDIRECT : KEEPS_METHOD).has(response.statusCode ?? 0);
       if (!location || !followable || hop === MAX_REDIRECTS) return response;
       response.resume();
       const next = new URL(location, url);
-      try {
-        parseServerUrl(next.href);
-      } catch (error) {
-        throw new RedirectRefused(`The MCP server redirected to ${next.href}, which the proxy won't follow. ${(error as Error).message}`);
-      }
-      // As fetch does, a redirect to another origin doesn't carry the credentials along.
       if (next.origin !== url.origin) {
-        sending = { ...sending };
-        delete sending.authorization;
+        throw new RedirectRefused(
+          `The MCP server redirected to ${next.href}, another origin, which the proxy won't follow: it talks only to the server you named, so your token and headers go nowhere else. If that's the server's address, start the simulator with it.`,
+        );
       }
       url = next;
     }

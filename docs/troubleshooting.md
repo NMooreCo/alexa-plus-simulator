@@ -6,6 +6,8 @@
 
 **"Refusing http://..." at start.** The simulator and the check only talk to `https://` servers, or `http://` on your own machine (`localhost`, `127.0.0.1`, `[::1]`), as Amazon's Local Inspector does, so your token and headers never cross the network readable. For a server on another machine, use HTTPS or a tunnel such as `cloudflared tunnel --url http://localhost:8787`.
 
+**"The MCP server redirected to ..., another origin."** The proxy and the check follow a redirect only within your server's origin, so your token and headers go nowhere else. If the address it redirects to is the server's own, start the simulator (or the check) with that address.
+
 **401 or 403.** The server wants sign-in. Sign in once with `alexa-plus-simulator link <url>`, which runs the account-linking flow and saves tokens, then use `--token-file` (it refreshes them as they expire). Or pass an access token you already have with `--token`, or the `MCP_TOKEN` environment variable, which keeps it out of your shell history. The check's AU rules look at your account-linking setup either way.
 
 **"Lost the simulator's proxy."** The CLI stopped. Start it again and reload the page.

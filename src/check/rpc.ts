@@ -39,6 +39,41 @@ function headersWith(own: Record<string, string>, developers: Record<string, str
   return headers;
 }
 
+/** Redirects a GET follows; anything else follows only the two that keep the method and the body, as the proxy does. */
+const ANY_REDIRECT = new Set([301, 302, 303, 307, 308]);
+const KEEPS_METHOD = new Set([307, 308]);
+const MAX_REDIRECTS = 5;
+
+/** Whether the developer gave headers of their own, which count as credentials: one may be an API key. */
+function hasHeaders(transport: Partial<Pick<Transport, "headers">>): boolean {
+  return Object.keys(transport.headers ?? {}).length > 0;
+}
+
+/**
+ * Sends a request to the server. One that carries the developer's
+ * credentials (a token, or headers given with --header) follows a redirect
+ * only within the server's origin, as the proxy does, and refuses one
+ * elsewhere: fetch would carry headers of the developer's own naming to
+ * wherever the server pointed. Without them, fetch follows redirects as it
+ * would anyway (and as a browser, where the check also runs, must).
+ */
+async function sendTo(transport: Pick<Transport, "fetch">, url: string, init: RequestInit, credentials: boolean): Promise<Response> {
+  if (!credentials) return transport.fetch(url, init);
+  let target = new URL(url);
+  for (let hop = 0; ; hop++) {
+    const response = await transport.fetch(target.href, { ...init, redirect: "manual" });
+    const location = response.headers.get("location");
+    const followable = ((init.method ?? "GET") === "GET" ? ANY_REDIRECT : KEEPS_METHOD).has(response.status);
+    if (!location || !followable || hop === MAX_REDIRECTS) return response;
+    await response.body?.cancel().catch(() => undefined);
+    const next = new URL(location, target);
+    if (next.origin !== target.origin) {
+      throw new Error(`the server redirected to ${next.href}, another origin, where the check won't send your token or headers; if that's the server's address, check it there`);
+    }
+    target = next;
+  }
+}
+
 /** How a refresh of a saved sign-in went, for AU-09. */
 export type RefreshOutcome =
   | { status: "refreshed"; sameAccessToken: boolean; newRefreshToken: boolean }
@@ -315,7 +350,7 @@ export class McpSession {
     const deadline = new Deadline(Math.min(this.transport.timeoutMs, 2000));
     try {
       const response = await deadline.race(
-        this.transport.fetch(this.transport.url, { method: "DELETE", headers: this.headers(), signal: deadline.signal }),
+        sendTo(this.transport, this.transport.url, { method: "DELETE", headers: this.headers(), signal: deadline.signal }, this.credentials()),
       );
       await deadline.race(response.body?.cancel() ?? Promise.resolve());
     } catch {
@@ -336,15 +371,20 @@ export class McpSession {
     return headersWith(own, this.transport.headers);
   }
 
+  /** Whether requests carry the developer's credentials: the token, or headers of their own. */
+  private credentials(): boolean {
+    return Boolean(this.bearer) || hasHeaders(this.transport);
+  }
+
   private post(message: unknown, deadline: Deadline): Promise<Response> {
     return deadline.race(
       Promise.resolve().then(() =>
-        this.transport.fetch(this.transport.url, {
-          method: "POST",
-          headers: this.headers(),
-          body: JSON.stringify(message),
-          signal: deadline.signal,
-        }),
+        sendTo(
+          this.transport,
+          this.transport.url,
+          { method: "POST", headers: this.headers(), body: JSON.stringify(message), signal: deadline.signal },
+          this.credentials(),
+        ),
       ),
     );
   }
@@ -440,11 +480,12 @@ export async function legacySseEndpoint(transport: Transport, token?: string): P
   try {
     const response = await deadline.race(
       Promise.resolve().then(() =>
-        transport.fetch(transport.url, {
-          method: "GET",
-          headers: headersWith({ Accept: "text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, transport.headers),
-          signal: deadline.signal,
-        }),
+        sendTo(
+          transport,
+          transport.url,
+          { method: "GET", headers: headersWith({ Accept: "text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, transport.headers), signal: deadline.signal },
+          Boolean(token) || hasHeaders(transport),
+        ),
       ),
     );
     if (!response.ok || mediaType(response.headers.get("content-type")) !== "text/event-stream" || !response.body) {
@@ -487,7 +528,7 @@ export async function getJson(transport: Pick<Transport, "fetch" | "timeoutMs"> 
   const ours = transport.url !== undefined && new URL(url).origin === new URL(transport.url).origin;
   const headers = headersWith({ Accept: "application/json" }, ours ? transport.headers : undefined);
   try {
-    const response = await deadline.race(Promise.resolve().then(() => transport.fetch(url, { headers, signal: deadline.signal })));
+    const response = await deadline.race(Promise.resolve().then(() => sendTo(transport, url, { headers, signal: deadline.signal }, ours && hasHeaders(transport))));
     const text = await deadline.race(response.text());
     if (!response.ok) return { url, status: response.status, problem: `HTTP ${response.status}` };
     let parsed: unknown;

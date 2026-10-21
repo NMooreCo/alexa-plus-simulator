@@ -257,6 +257,24 @@ describe("POST /mcp", () => {
     expect(reply.json()).toMatchObject({ id: "p2", error: { message: expect.stringContaining("redirected to http://example.com/mcp") } });
   });
 
+  it("won't follow a redirect to another origin, even one on this machine, so the token and headers go nowhere else", async () => {
+    const other = await FakeUpstream.start();
+    try {
+      fake.redirectTo = other.url;
+      const proxy = await launch({ upstream: `${fake.origin}/away`, token: "secret-token", headers: { "X-Api-Key": "key-1" } });
+      const reply = await post(proxy, rpc("ping", undefined, "p3"), { "x-demo-passcode": "1234" });
+      expect(reply.status).toBe(502);
+      expect(reply.json()).toMatchObject({ id: "p3", error: { message: expect.stringContaining(`redirected to ${other.url}, another origin, which the proxy won't follow`) } });
+      fake.allowGet = true;
+      expect((await call(`${proxy.url}/mcp`, { headers: { accept: "text/event-stream" } })).status).toBe(502);
+      // The server named heard both requests; the other origin heard nothing.
+      expect(fake.seen.map((seen) => seen.path)).toEqual(["/away", "/away"]);
+      expect(other.seen).toEqual([]);
+    } finally {
+      await other.close();
+    }
+  });
+
   it("answers 502 with a JSON-RPC error for each request when the server can't be reached", async () => {
     // A server that hangs up on every connection fails at once, where a closed port can take seconds on Windows.
     const dead = createNetServer((socket) => socket.destroy());

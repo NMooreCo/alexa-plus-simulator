@@ -54,6 +54,8 @@ export class FakeUpstream {
   paginate = false;
   /** Answer GET /mcp with an event stream; otherwise 405, which servers are allowed to send. */
   allowGet = true;
+  /** Where a request to /away is redirected, keeping its method. */
+  redirectTo = "";
   /** The open GET /mcp streams, and how many have closed. */
   readonly streams = new Set<ServerResponse>();
   closedStreams = 0;
@@ -86,6 +88,7 @@ export class FakeUpstream {
     this.failNext = undefined;
     this.paginate = false;
     this.allowGet = true;
+    this.redirectTo = "";
     this.closedStreams = 0;
   }
 
@@ -119,6 +122,10 @@ export class FakeUpstream {
     }
     if (path === "/elsewhere") {
       response.writeHead(307, { location: "http://example.com/mcp" }).end();
+      return;
+    }
+    if (path === "/away") {
+      response.writeHead(307, { location: this.redirectTo }).end();
       return;
     }
     if (path !== "/mcp") {
