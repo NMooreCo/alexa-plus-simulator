@@ -20,7 +20,7 @@ Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` (or credentials for Mic
 ## What it does
 
 - **Simulates the device.** The page is an MCP client that connects the way Alexa+ says it does (protocol version `2025-03-26`, client `Alexa+ MCP Client`, `roots` capability), lists your tools and calls them. Pick an Echo Show 5, 8, 10, 15 or 21, or an Echo Dot with no screen at all.
-- **Talks.** Claude stands in for Alexa+'s own model: it decides what to say and which of your tools to call, and the page speaks the answer. Talk with the microphone (Chrome or Edge), turn on hands-free and start with "Alexa", or type. When it asks you a question, it listens for the answer.
+- **Talks.** A model you choose stands in for Alexa+'s own (Claude, Amazon Nova or another Bedrock model, Microsoft Foundry, Gemini or OpenAI; see [Models](#models)): it decides what to say and which of your tools to call, and the page speaks the answer. Talk with the microphone (Chrome or Edge), turn on hands-free and start with "Alexa", or type. When it asks you a question, it listens for the answer.
 - **Shows your screens.** A tool with `_meta.ui.resourceUri` gets its MCP Apps screen on the device, sized for the Small (10" and below) or Large (11" and above) surface. Screens run under the Content Security Policy their resource declares in `_meta.ui.csp`, as the MCP Apps standard has a host do, and anything the policy blocks shows up in the log with the line to add.
 - **Records the traffic.** Every JSON-RPC exchange, with its timing; anything at 500 ms or more is flagged.
 - **Signs in.** For a server that needs sign-in, `link` runs Alexa+'s account linking on your machine and saves the tokens, which the simulator and the check then use and refresh. See [Servers that need sign-in](#servers-that-need-sign-in).
@@ -181,7 +181,7 @@ Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) 
 
 ## How it differs from the real thing
 
-- **The model is Claude, not Alexa's.** It follows your server's `instructions` and tool descriptions as a capable model would, with a short spoken style; Alexa+ may choose differently.
+- **The model isn't Alexa's.** Whichever you choose follows your server's `instructions` and tool descriptions as a capable model would, with a short spoken style; Alexa+ may choose differently.
 - **The voice is your browser's.** Recognition and speech come from the Web Speech API.
 - **Amazon's full rubric isn't public.** The check covers what Amazon has published (quoted, with links, in [docs/alexa-requirements.md](docs/alexa-requirements.md)) and says so in every report. The verdicts are READY, CONDITIONAL and NOT_READY, so they can't be mistaken for Amazon's certification. Amazon's inspector also judges visual, accessibility and UI quality rules it hasn't published; the screen check covers rendering, fit, declared loads and errors only.
 - **It hasn't been compared with Amazon's own tools,** which are partner-only. It follows their documentation; if you have access to both and they disagree, please open an issue.

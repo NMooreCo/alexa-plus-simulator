@@ -74,6 +74,8 @@ The page sends each turn as a POST of JSON in the Claude Messages API's shape, a
 { "id": "msg_...", "type": "message", "role": "assistant", "model": "...", "content": [/* text and tool_use blocks */], "stop_reason": "tool_use", "usage": { "input_tokens": 1075, "output_tokens": 28 } }
 ```
 
+Pass reply blocks back exactly as they came, extra fields included: a Gemini reply's blocks carry a `thought_signature` that Gemini requires on the next turn (the page does this already, and so does any route built like the simulator's).
+
 On failure, answer with an HTTP error and `{ "error": { "code": "...", "message": "..." } }`. The page explains `no_key` itself, and an extension's `modelFailed` hook can handle codes of your own (a demo passcode, say).
 
 The route is where your model key lives, so keep it on your server, and think about who can reach it: a public demo should limit how often it answers and may want a passcode, since every turn costs money.
