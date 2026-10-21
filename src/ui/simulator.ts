@@ -170,6 +170,9 @@ export async function startSimulator(options: SimulatorOptions): Promise<Simulat
 
   /** Puts the page on another device: its screen size, or no screen at all. */
   async function setDevice(d: Device) {
+    // Another device starts another conversation: what the model is told about the device changes, and a model that
+    // keeps its earlier reasoning can refuse a conversation whose instructions changed underneath it.
+    const switching = d.id !== device.id && state.messages.length > 0;
     device = d;
     devicePick.value = d.id;
     store("device", d.id);
@@ -199,6 +202,7 @@ export async function startSimulator(options: SimulatorOptions): Promise<Simulat
       (dot
         ? `A simulated Alexa+ on an ${d.name}: no screen, so everything has to work by voice.`
         : `A simulated Alexa+ on an ${d.name}. Alexa+ renders a tool's MCP Apps screen when the tool names one in _meta.ui.resourceUri, and Amazon asks that screens work on both surfaces.`);
+    if (switching) newConversation();
     if (mounted) await mounted.bridge.sendHostContextChange({ containerDimensions: { width: d.width!, height: d.height! } });
     else if (!dot && lastScreen) {
       // Shown again fresh when its tool only reads (taps may have changed things since); a change isn't made twice.

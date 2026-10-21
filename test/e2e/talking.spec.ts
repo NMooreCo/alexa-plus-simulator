@@ -46,6 +46,16 @@ test("typed, the assistant calls the server's tool, its screen comes up, and the
   await expect(page.getByRole("button", { name: "Talk", exact: true })).toHaveAttribute("aria-pressed", "false");
 });
 
+test("switching to another device starts a new conversation", async ({ page }) => {
+  await openSimulator(page, SIMULATOR.page);
+  await page.getByLabel("What you'd say").fill(QUESTION);
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect.poll(() => conversation(page)).toEqual(TURN);
+
+  await page.getByRole("combobox", { name: "Device", exact: true }).selectOption("dot");
+  await expect.poll(() => conversation(page)).toEqual([...TURN, "page: New conversation"]);
+});
+
 test("asked by voice, a question back listens for the answer", async ({ page }) => {
   await openSimulator(page, SIMULATOR.page);
   await page.getByRole("button", { name: "Talk", exact: true }).click();

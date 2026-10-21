@@ -19,7 +19,7 @@ It needs Node 22 or later. Then open http://localhost:6274. Set `ANTHROPIC_API_K
 
 ## What it does
 
-- **Simulates the device.** The page is an MCP client that connects the way Alexa+ says it does (protocol version `2025-03-26`, client `Alexa+ MCP Client`, `roots` capability), lists your tools and calls them. Pick an Echo Show 5, 8, 10, 15 or 21, or an Echo Dot with no screen at all.
+- **Simulates the device.** The page is an MCP client that connects the way Alexa+ says it does (protocol version `2025-03-26`, client `Alexa+ MCP Client`, `roots` capability), lists your tools and calls them. Pick an Echo Show 5, 8, 10, 15 or 21, or an Echo Dot with no screen at all; another device starts a new conversation.
 - **Talks.** A model you choose stands in for Alexa+'s own (Claude, Amazon Nova or another Bedrock model, Microsoft Foundry, Gemini or OpenAI; see [Models](#models)): it decides what to say and which of your tools to call, and the page speaks the answer. Talk with the microphone (Chrome or Edge), turn on hands-free and start with "Alexa", or type. When it asks you a question, it listens for the answer.
 - **Shows your screens.** A tool with `_meta.ui.resourceUri` gets its MCP Apps screen on the device, sized for the Small (10" and below) or Large (11" and above) surface. Screens run under the Content Security Policy their resource declares in `_meta.ui.csp`, as the MCP Apps standard has a host do, and anything the policy blocks shows up in the log with the line to add.
 - **Records the traffic.** Every JSON-RPC exchange, with its timing; anything at 500 ms or more is flagged.
