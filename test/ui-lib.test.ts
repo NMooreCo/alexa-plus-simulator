@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { cspFix, cspFor, echoable, resultText, rpcLabel, schemaSkeleton, ToolNames, withCsp } from "../src/ui/lib.ts";
+import { cspFix, cspFor, echoable, prologEnd, resultText, rpcLabel, schemaSkeleton, ToolNames, withCsp } from "../src/ui/lib.ts";
 
 describe("a screen's Content Security Policy", () => {
   it("allows nothing from the network unless the resource declares it", () => {
@@ -32,20 +32,71 @@ describe("a screen's Content Security Policy", () => {
     expect(cspFor({ connectDomains: ["https://a.example; script-src *", "javascript:alert(1)", "https://ok.example/path", 7] })).toContain("connect-src 'none'");
   });
 
-  it("goes first in <head>, with a watcher that reports what it blocked", () => {
-    const html = withCsp('<!doctype html><html><head><title>x</title><script src="https://cdn.example/a.js"></script></head><body></body></html>');
-    const meta = html.indexOf('http-equiv="Content-Security-Policy"');
-    expect(meta).toBeGreaterThan(html.indexOf("<head>"));
-    expect(meta).toBeLessThan(html.indexOf("<title>"));
+  const META = '<meta http-equiv="Content-Security-Policy"';
+
+  it("goes first, ahead of the screen's own markup, with a watcher that reports what it blocked, and keeps the doctype first", () => {
+    const page = '<html><head><title>x</title><script src="https://cdn.example/a.js"></script></head><body></body></html>';
+    const html = withCsp(`<!doctype html>${page}`);
+    expect(html.startsWith(`<!doctype html>${META}`)).toBe(true);
     expect(html).toContain("securitypolicyviolation");
-    expect(html.startsWith("<!doctype html>")).toBe(true);
+    // Nothing of the screen's own is changed: the two tags are spliced in whole.
+    expect(html.endsWith(`</script>${page}`)).toBe(true);
+    expect(withCsp("<html><body>hi</body></html>")).toMatch(new RegExp(`^${META}`));
+    expect(withCsp("<!DOCTYPE html><p>hi</p>")).toMatch(new RegExp(`^<!DOCTYPE html>${META}`));
+    expect(withCsp("<p>hi</p>")).toMatch(new RegExp(`^${META}`));
+    expect(withCsp('<html lang="en"><HEAD data-x="1"><p>hi</p>')).toMatch(new RegExp(`^${META}`));
   });
 
-  it("finds a place for itself in a document without <head>, and keeps the doctype first", () => {
-    expect(withCsp("<html><body>hi</body></html>")).toMatch(/^<html><head><meta http-equiv="Content-Security-Policy"/);
-    expect(withCsp("<!DOCTYPE html><p>hi</p>")).toMatch(/^<!DOCTYPE html><head><meta/);
-    expect(withCsp("<p>hi</p>")).toMatch(/^<head><meta/);
-    expect(withCsp('<html lang="en"><HEAD data-x="1"><p>hi</p>')).toMatch(/<HEAD data-x="1"><meta http-equiv/);
+  it("can't be talked out of its place by a <head> in a comment, a script or an attribute", () => {
+    const real = "<html><head><title>Tasks</title></head><body><img src=https://images.example/x.png></body></html>";
+    for (const before of [
+      "<!-- keep <head> small -->",
+      "<!-- keep <head> small --><!doctype html>",
+      "<!doctype html>\n<!-- <head> -->\n",
+      "<!-- a --!> <!doctype html>",
+      "<?xml version=\"1.0\"?><!doctype html>",
+      "<!doctype html><!-- <!-- <head> -->",
+    ]) {
+      expect(withCsp(before + real)).toBe(`${before}${withCsp("")}${real}`);
+    }
+    // These have no prolog to keep: the tags go first, ahead of where a <head> appears to be.
+    for (const page of ['<html><script>"<head>"</script><head>', '<html data-x="<head>"><head>', "<html><!-- <head> --><head>"]) {
+      expect(withCsp(page).startsWith(META)).toBe(true);
+    }
+  });
+
+  it("ends a comment where the HTML standard does, so it never lands inside one", () => {
+    expect(prologEnd("<!--><p>")).toBe(5);
+    expect(prologEnd("<!---><p>")).toBe(6);
+    expect(prologEnd("<!----><p>")).toBe(7);
+    expect(prologEnd("<!--!><p>-->")).toBe(12);
+    expect(prologEnd("<!-- a ---><p>")).toBe(11);
+    expect(prologEnd("<!-- a --!><p>")).toBe(11);
+    expect(prologEnd("<!-- a -- > --><p>")).toBe(15);
+    expect(prologEnd("<!x><![CDATA[ a ]]></ x><//><p>")).toBe(28);
+    expect(prologEnd("</><p>")).toBe(3);
+    // A ">" ends a doctype even inside its quotes.
+    expect(prologEnd(" \t\n<!DOCTYPE html PUBLIC \"a>b\">x")).toBe(28);
+    // An end tag or text ends the prolog; so does "<" that opens nothing.
+    expect(prologEnd("<!-- c --></p>")).toBe(10);
+    expect(prologEnd("<!-- c -->hi")).toBe(10);
+    expect(prologEnd("<!-- c -->< p")).toBe(10);
+    // A piece that runs to the end of the document ends the prolog where it starts, so nothing lands inside it.
+    expect(prologEnd("<!doctype html><!-- <head> and no end")).toBe(15);
+    expect(prologEnd("<!doctype html")).toBe(0);
+  });
+
+  it("splices the tags in whole, and puts them after whatever prolog comes first", () => {
+    const piece = fc.constantFrom(" ", "\n", "<!---->", "<!-->", "<!--->", "<!-- <head> -->", "<!-- --!>", "<!-- <!-- -->", "<!doctype html>", "<!DOCTYPE html>", "<?php ?>", "<!x>", "</>", "</ y>");
+    const rest = fc.constantFrom("", "<html><head></head>", "<head><title>t</title>", "<p>hi", "text", "</p>", "<");
+    fc.assert(
+      fc.property(fc.array(piece, { maxLength: 8 }), rest, (pieces, tail) => {
+        const prolog = pieces.join("");
+        const html = withCsp(prolog + tail);
+        const tags = withCsp("");
+        expect(html).toBe(prolog + tags + tail);
+      }),
+    );
   });
 
   it("says where to declare what was blocked", () => {

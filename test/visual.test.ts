@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 // @ts-expect-error The example is plain JavaScript.
@@ -13,6 +14,7 @@ import { htmlReport } from "../src/report/html.ts";
 import { main } from "../src/run.ts";
 import type { ReadinessReport } from "../src/shared/contract.ts";
 import { buildReport } from "../src/check/index.ts";
+import { withCsp } from "../src/ui/lib.ts";
 import { checkScreens, judgeScreens, launchBrowser, type ScreenShot, screenCalls, VISUAL_SOURCES } from "../src/visual/index.ts";
 
 const shot = (over: Partial<ScreenShot> = {}): ScreenShot => ({
@@ -128,16 +130,25 @@ describe("without a browser", () => {
   });
 });
 
-/** A server whose screen does everything wrong: too wide, loads an image it didn't declare, and throws. */
-async function startBadScreen(): Promise<{ url: string; close: () => Promise<void> }> {
-  const uri = "ui://bad/screen";
-  const html = `<!doctype html><html><head><style>body{margin:0;font:28px system-ui;color:#fff;background:#123}.wide{width:3000px;height:40px;background:#456}</style></head>
-<body><h1>A screen that misbehaves</h1><div class="wide"></div><img src="https://images.example/undeclared.png" alt="">
-<script>
+/** The MCP Apps handshake done by hand (ask to start, then say it's ready), then `ready`, which runs in the screen once it has started. */
+const handshake = (ready = "") => `<script>
 let id = 0; const send = (m) => parent.postMessage(m, "*");
-addEventListener("message", (e) => { const m = e.data; if (m && m.jsonrpc === "2.0" && m.id === 1 && !m.method) { send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} }); setTimeout(() => { throw new Error("boom from the screen"); }, 0); } });
+addEventListener("message", (e) => { const m = e.data; if (m && m.jsonrpc === "2.0" && m.id === 1 && !m.method) { send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} }); ${ready} } });
 send({ jsonrpc: "2.0", id: ++id, method: "ui/initialize", params: { appInfo: { name: "bad", version: "1" }, appCapabilities: {}, protocolVersion: "2026-01-26" } });
-</script></body></html>`;
+</script>`;
+
+/** A screen that does everything wrong: too wide, loads an image it didn't declare, and throws. */
+const BAD_SCREEN = `<!doctype html><html><head><style>body{margin:0;font:28px system-ui;color:#fff;background:#123}.wide{width:3000px;height:40px;background:#456}</style></head>
+<body><h1>A screen that misbehaves</h1><div class="wide"></div><img src="https://images.example/undeclared.png" alt="">
+${handshake('setTimeout(() => { throw new Error("boom from the screen"); }, 0);')}</body></html>`;
+
+/** A screen with a comment before its real <head> that mentions one, as if to draw the policy into the comment, and that loads an image it didn't declare. */
+const COMMENTED_HEAD_SCREEN = `<!-- keep <head> small --><!doctype html><html><head><title>Tasks</title></head>
+<body><h1>Tasks</h1><img src="https://images.example/sneaky.png" alt="">${handshake()}</body></html>`;
+
+/** A server with one read-only tool, which shows this screen. */
+async function startScreen(html: string): Promise<{ url: string; close: () => Promise<void> }> {
+  const uri = "ui://bad/screen";
   const build = () => {
     const server = new McpServer({ name: "bad-screen", version: "1.0.0" });
     registerAppTool(server, "show_bad", { title: "Show the bad screen", description: "Shows a screen.", inputSchema: z.object({}), annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: uri } } }, async () => ({
@@ -176,13 +187,16 @@ const uiDir = fileURLToPath(new URL("../dist/ui", import.meta.url));
 describe.skipIf(!browser)(`rendering screens in a headless browser (${browser ?? "none found"})`, () => {
   let example: { url: string; close: () => Promise<void> };
   let bad: { url: string; close: () => Promise<void> };
+  let commented: { url: string; close: () => Promise<void> };
   beforeAll(async () => {
     example = (await startExample({ port: 0 })) as typeof example;
-    bad = await startBadScreen();
+    bad = await startScreen(BAD_SCREEN);
+    commented = await startScreen(COMMENTED_HEAD_SCREEN);
   });
   afterAll(async () => {
     await example?.close();
     await bad?.close();
+    await commented?.close();
   });
 
   it("passes the example's screen on every device and saves a screenshot of each", { timeout: 120_000 }, async () => {
@@ -213,5 +227,55 @@ describe.skipIf(!browser)(`rendering screens in a headless browser (${browser ??
     expect(byId["VR-02"]).toMatchObject({ status: "WARN", notes: expect.stringContaining("3000 px wide on a 1280 px screen") });
     expect(byId["VR-03"]).toMatchObject({ status: "FAIL", notes: expect.stringContaining("https://images.example/undeclared.png (img-src)") });
     expect(byId["VR-04"]).toMatchObject({ status: "WARN", notes: expect.stringContaining("boom from the screen") });
+  });
+
+  it("holds a screen to its policy when a comment before its <head> mentions one", { timeout: 120_000 }, async () => {
+    const result = await checkScreens({ serverUrl: commented.url, uiDir, devices: ["show-8"], browser: browser! });
+    const byId = Object.fromEntries(result.rules.map((r) => [r.id, r]));
+    expect(byId["VR-01"]!.status).toBe("PASS");
+    expect(byId["VR-03"]).toMatchObject({ status: "FAIL", notes: expect.stringContaining("https://images.example/sneaky.png (img-src)") });
+  });
+
+  it("puts the policy first in <head> as the browser's own parser reads it, whatever comes before the screen's markup", { timeout: 60_000 }, async () => {
+    // Pieces of what can come before a document's first element, run together any which way, and what might follow.
+    const piece = fc.constantFrom(" ", "\n", "<!--", "-->", "--!>", "-", "!", ">", "<", "<!", "<?", "</", "</>", "<!doctype html>", '<!DOCTYPE html PUBLIC "a>b">', "x", "<head>", "<![CDATA[", "]]>");
+    const rest = fc.constantFrom("", '<html lang="en"><head><title>t</title></head><body><p>hi</p></body></html>', "<head><meta charset=utf-8>", "<body><img src=x.png>", "text", "</p>", "<p>");
+    const documents = fc.sample(
+      fc.tuple(fc.array(piece, { maxLength: 12 }), rest).map(([pieces, tail]) => pieces.join("") + tail),
+      { numRuns: 600, seed: 20261021 },
+    );
+    const launched = await launchBrowser(browser!);
+    try {
+      const page = await launched.browser.newPage();
+      const seen = await page.evaluate((pairs) => {
+        interface ParsedNode {
+          nodeType: number;
+          nodeValue: string | null;
+          childNodes: ArrayLike<ParsedNode>;
+        }
+        interface ParsedDocument extends ParsedNode {
+          compatMode: string;
+          head: { firstElementChild: { getAttribute(name: string): string | null } | null };
+          body: { innerHTML: string } | null;
+        }
+        const parser = new (globalThis as unknown as { DOMParser: new () => { parseFromString(html: string, type: string): ParsedDocument } }).DOMParser();
+        // Every comment's text, in order: one the tags landed in, or that they split, reads differently.
+        const comments = (node: ParsedNode): (string | null)[] => Array.from(node.childNodes).flatMap((n) => (n.nodeType === 8 ? [n.nodeValue] : comments(n)));
+        return pairs.map(([original, spliced]) => {
+          const before = parser.parseFromString(original, "text/html");
+          const after = parser.parseFromString(spliced, "text/html");
+          return {
+            original,
+            first: after.head.firstElementChild?.getAttribute("http-equiv") ?? null,
+            sameMode: before.compatMode === after.compatMode,
+            sameBody: before.body?.innerHTML === after.body?.innerHTML,
+            sameComments: JSON.stringify(comments(before)) === JSON.stringify(comments(after)),
+          };
+        });
+      }, documents.map((html): [string, string] => [html, withCsp(html)]));
+      for (const s of seen) expect(s, JSON.stringify(s.original)).toEqual({ original: s.original, first: "Content-Security-Policy", sameMode: true, sameBody: true, sameComments: true });
+    } finally {
+      await launched.browser.close();
+    }
   });
 });

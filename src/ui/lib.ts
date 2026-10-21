@@ -48,21 +48,70 @@ export function cspFor(csp: ResourceCsp = {}): string {
 }
 
 /**
- * The screen's HTML with its policy at the top of <head>, and a watcher that
+ * The screen's HTML with its policy first in <head>, and a watcher that
  * tells the page what the policy blocked, so a screen that loads something it
  * didn't declare says so instead of quietly looking broken.
+ *
+ * The two go in just past the document's prolog (see prologEnd), ahead of
+ * anything that makes an element, so the HTML parser opens <head> for them
+ * whatever the screen's own markup says; its own <html> and <head> tags then
+ * add to those. Looking for "<head>" instead finds one in a comment, a script
+ * or an attribute just as readily, and a policy put there is no policy at all.
  */
 export function withCsp(html: string, csp?: ResourceCsp): string {
   const policy = cspFor(csp).replaceAll('"', "&quot;");
   const head =
     `<meta http-equiv="Content-Security-Policy" content="${policy}">` +
     `<script>document.addEventListener("securitypolicyviolation",function(e){parent.postMessage({type:"${CSP_VIOLATION}",blocked:e.blockedURI,directive:e.effectiveDirective},"*")})</script>`;
-  const open = /<head(?:\s[^>]*)?>/i.exec(html);
-  if (open) return html.slice(0, open.index + open[0].length) + head + html.slice(open.index + open[0].length);
-  const root = /<html(?:\s[^>]*)?>/i.exec(html);
-  if (root) return `${html.slice(0, root.index + root[0].length)}<head>${head}</head>${html.slice(root.index + root[0].length)}`;
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
-  return doctype ? `${doctype[0]}<head>${head}</head>${html.slice(doctype[0].length)}` : `<head>${head}</head>${html}`;
+  const at = prologEnd(html);
+  return html.slice(0, at) + head + html.slice(at);
+}
+
+/** What the HTML standard counts as whitespace before the document's first element. */
+const PROLOG_SPACE = new Set(["\t", "\n", "\f", "\r", " "]);
+
+/**
+ * Where a document's prolog ends: the whitespace, comments and doctype an
+ * HTML parser reads before it makes any element. Each piece ends where the
+ * HTML standard's tokenizer ends it ("<!-->" and "<!--->" are whole
+ * comments, "--!>" closes one, "<?...>" and "<!...>" are comments up to the
+ * next ">"), since tags spliced into a comment are only more comment.
+ * Anything else ends the prolog, even a stray character some browsers skip:
+ * tags spliced in ahead of it still open <head>, where after it they might
+ * land in <body>. Splicing in after the prolog keeps a doctype first, so a
+ * screen renders in the mode it would have; a piece that runs to the end of
+ * the document ends the prolog at its start instead, so nothing spliced in
+ * can fall inside it.
+ */
+export function prologEnd(html: string): number {
+  let at = 0;
+  for (;;) {
+    while (at < html.length && PROLOG_SPACE.has(html[at]!)) at++;
+    let end: number | undefined;
+    if (html.startsWith("<!--", at)) end = commentEnd(html, at + 4);
+    else if (/^<!doctype/i.test(html.slice(at, at + 9))) end = after(">", html, at + 9);
+    else if (html.startsWith("</>", at)) end = at + 3;
+    else if (/^(?:<!|<\?|<\/[^a-z>])/i.test(html.slice(at, at + 3))) end = after(">", html, at + 2);
+    else return at;
+    if (end === undefined) return at;
+    at = end;
+  }
+}
+
+/** Just past the next `text` from `from`, or undefined when there's none before the end. */
+function after(text: string, html: string, from: number): number | undefined {
+  const found = html.indexOf(text, from);
+  return found < 0 ? undefined : found + text.length;
+}
+
+/** Where a comment whose "<!--" ends at `body` ends, by the tokenizer's rules, or undefined when it runs to the end. */
+function commentEnd(html: string, body: number): number | undefined {
+  if (html.startsWith(">", body)) return body + 1;
+  if (html.startsWith("->", body)) return body + 2;
+  const close = /--!?>/g;
+  close.lastIndex = body;
+  const found = close.exec(html);
+  return found ? found.index + found[0].length : undefined;
 }
 
 /** Which directive to declare an origin under, for the note that says how to fix a blocked load. */
