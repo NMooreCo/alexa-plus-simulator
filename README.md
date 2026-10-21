@@ -163,7 +163,7 @@ import "alexa-plus-simulator/ui/style.css";
 await startSimulator({ mcpUrl: "/mcp", modelUrl: "/api/model", check: "browser", extensions: [myExtension] });
 ```
 
-[docs/extensions.md](docs/extensions.md) has the hooks, the API and an example.
+[Corral for Alexa+](https://alexa-demo.corral.narralogy.ai/echo)'s hosted demo is this simulator with one extension. [docs/extensions.md](docs/extensions.md) has the hooks, the API and an example.
 
 ## For coding agents
 

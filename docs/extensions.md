@@ -48,6 +48,8 @@ await startSimulator({
 
 The model route takes and answers the same shape as the CLI's `/api/model`: a Messages API request (`messages`, `tools`, and a `context` with the server's instructions, the time, the time zone and the device) and the Messages API's reply. Without a proxy, the page records its own MCP traffic; `check: "browser"` runs the readiness check from the visitor's browser.
 
+[Corral for Alexa+](https://alexa-demo.corral.narralogy.ai/echo) is built this way: its hosted demo is this simulator with one extension that adds who's speaking, a demo passcode, Amazon Polly's voice, the household's own clock, alerts the device says on its own, and a scripted demo.
+
 ## Hooks
 
 Every hook is optional. Where several extensions give one, headers, context and turn lines come from all of them, in the order the extensions were given; the voice, the clock and the screen refresh come from the first one that has them.

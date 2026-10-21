@@ -1,6 +1,6 @@
 # Hosting the simulator in your own page
 
-The CLI runs the simulator on your machine. You can also put it in a page your own server serves, as an add-on's public demo, say.
+The CLI runs the simulator on your machine. You can also put it in a page your own server serves, as an add-on's public demo, say. [Corral for Alexa+](https://alexa-demo.corral.narralogy.ai/echo) does this, with one extension for what's its own.
 
 Hosted this way there's no proxy: the page talks straight to your MCP endpoint and your model route, records its own traffic, and can run the readiness check from the visitor's browser.
 
