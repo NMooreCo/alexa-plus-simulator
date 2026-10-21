@@ -56,9 +56,9 @@ Options:
 Talking needs a model: ANTHROPIC_API_KEY (and ANTHROPIC_BASE_URL for a gateway); ANTHROPIC_FOUNDRY_API_KEY (or
 AZURE_OPENAI_AUTH_TOKEN) with ANTHROPIC_FOUNDRY_RESOURCE (or ANTHROPIC_FOUNDRY_BASE_URL) for Microsoft Foundry;
 AWS_BEARER_TOKEN_BEDROCK, or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN), for Bedrock;
-GEMINI_API_KEY or GOOGLE_API_KEY (and GOOGLE_GEMINI_BASE_URL for a gateway) for Gemini; or OPENAI_API_KEY (and
-OPENAI_BASE_URL for Azure OpenAI, Ollama, LM Studio, Groq or another server that speaks its API). The Tools
-tab works without one.
+GEMINI_API_KEY or GOOGLE_API_KEY (and GOOGLE_GEMINI_BASE_URL for a gateway) for Gemini; or OPENAI_API_KEY, and
+OPENAI_BASE_URL for another server that speaks Chat Completions, such as Azure OpenAI or a model server on your
+own machine (none tried yet). The Tools tab works without one.
 ${DISCLAIMER}`;
 
 const OPTIONS = {

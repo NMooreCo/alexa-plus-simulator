@@ -65,6 +65,12 @@ describe("the command line", () => {
     const help = capture();
     expect(await main(["--help"], help.io)).toBe(0);
     expect(help.out.join("\n")).toContain("alexa-plus-simulator check <mcp-url>");
+    // Other Chat Completions servers in the README's own words, which vouch for none of them by name.
+    const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+    const openai = /^\| `openai` \| (.+?) \|/m.exec(readme)![1]!.replaceAll("`", "");
+    const said = help.out.join("\n").replace(/\s+/g, " ");
+    expect(said).toContain(openai);
+    expect(said).not.toMatch(/Ollama|LM Studio|Groq/);
     const bare = capture();
     expect(await main([], bare.io)).toBe(1);
     const bad = capture();
