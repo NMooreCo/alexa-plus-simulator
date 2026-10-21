@@ -77,7 +77,7 @@ describe("the command line", () => {
       // The package's rules are in it too.
       expect(report.rules.some((r) => r.category === "package")).toBe(true);
       expect(sim.out.join("\n")).toContain(uiUrl);
-      expect(sim.out.join("\n")).toContain("Model:     none: set ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) or OPENAI_API_KEY");
+      expect(sim.out.join("\n")).toContain("Model:     none: set ANTHROPIC_API_KEY; ANTHROPIC_FOUNDRY_API_KEY and ANTHROPIC_FOUNDRY_RESOURCE (Microsoft Foundry);");
     } finally {
       sim.stop();
       expect(await done).toBe(0);
@@ -104,9 +104,23 @@ describe("the command line", () => {
       told.stop();
       expect(await running).toBe(0);
     }
+    // Microsoft Foundry comes before Bedrock, and a deployment can be told which API it speaks.
+    const foundry = capture({ ANTHROPIC_FOUNDRY_API_KEY: "foundry-key", ANTHROPIC_FOUNDRY_RESOURCE: "example-resource", AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key" });
+    const onFoundry = main([example.url, "--server-port", "0", "--client-port", "0", "--model", "voice-prod", "--foundry-api", "anthropic"], foundry.io);
+    const foundryUrls = await foundry.running;
+    try {
+      expect(await (await fetch(`${foundryUrls.url}/api/info`)).json()).toMatchObject({ model: "Claude on Microsoft Foundry (voice-prod)", provider: "foundry" });
+      expect(foundry.out).toContain("  Model:     Claude on Microsoft Foundry (voice-prod) at example-resource.services.ai.azure.com, with an API key");
+    } finally {
+      foundry.stop();
+      expect(await onFoundry).toBe(0);
+    }
     const unknown = capture();
-    expect(await main([example.url, "--provider", "gemini"], unknown.io)).toBe(2);
-    expect(unknown.err[0]).toBe('--provider takes anthropic, bedrock or openai, not "gemini".');
+    expect(await main([example.url, "--provider", "mistral"], unknown.io)).toBe(2);
+    expect(unknown.err[0]).toBe('--provider takes anthropic, foundry, bedrock, gemini or openai, not "mistral".');
+    const api = capture();
+    expect(await main([example.url, "--foundry-api", "responses"], api.io)).toBe(2);
+    expect(api.err[0]).toBe('--foundry-api takes anthropic or openai, not "responses".');
     const region = capture();
     expect(await main([example.url, "--region", "us-east-1.example.com"], region.io)).toBe(2);
     expect(region.err[0]).toContain("isn't an AWS Region");

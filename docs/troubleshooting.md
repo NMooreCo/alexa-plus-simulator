@@ -26,7 +26,11 @@
 
 ## Talking
 
-**"Talking needs an Anthropic API key."** Set `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` for a gateway) before starting the simulator. Without one, the Tools tab still calls every tool.
+**"No model is set up," or "Set ... to talk to the simulator."** Set one provider's credentials before starting the simulator: `ANTHROPIC_API_KEY`; `ANTHROPIC_FOUNDRY_API_KEY` with `ANTHROPIC_FOUNDRY_RESOURCE` for Microsoft Foundry; `AWS_BEARER_TOKEN_BEDROCK`, or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, for Bedrock; `GEMINI_API_KEY` for Gemini; or `OPENAI_API_KEY` (or `OPENAI_BASE_URL` for a local server). The startup line says which provider it found, `--provider` picks one, and the README's [Models](../README.md#models) section has the rest. Without any, the Tools tab still calls every tool.
+
+**"... didn't accept the API key (or it can't use this model)."** The provider turned down the credentials, or the account can't use that model: on Bedrock, check that the account can use the model in its Region; on Gemini, that the key is for the Gemini API; on Microsoft Foundry, that an Entra ID token hasn't expired (they last about an hour).
+
+**"Microsoft Foundry answered 404."** On Foundry, `--model` is a deployment's name, which is the model's id (like `claude-opus-5-5`) unless you named the deployment otherwise. A deployment whose name doesn't say whether it's Claude needs `--foundry-api anthropic` or `--foundry-api openai`.
 
 **The microphone doesn't work.** Speech recognition needs Chrome or Edge, and the page has to be allowed to use the microphone. Typing works everywhere.
 

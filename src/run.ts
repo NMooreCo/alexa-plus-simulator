@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { buildReport, formatReport, parseCalls, runChecks, type ToolCall, type TokenSource, validatePackage } from "./check/index.ts";
 import { sameResource } from "./check/auth.ts";
 import { CLIENT_SECRET_ENV, DEFAULT_CALLBACK_PORT, DEFAULT_TOKEN_FILE, link, TokenFile } from "./link/index.ts";
-import { DEFAULT_MODELS, isAwsRegion, isProviderName, modelOptionsFromEnv, setUpModel } from "./model/index.ts";
+import { DEFAULT_MODELS, isAwsRegion, isFoundryApi, isProviderName, modelOptionsFromEnv, setUpModel } from "./model/index.ts";
 import { type ProxyOptions, type Route, startProxy } from "./proxy/index.ts";
 import { htmlReport } from "./report/html.ts";
 import { DEFAULT_CLIENT_PORT, DEFAULT_SERVER_PORT, DISCLAIMER, type ReadinessReport, type RuleResult, VERSION } from "./shared/contract.ts";
@@ -32,9 +32,13 @@ Options:
   --extension <file.js>  An extension for the page: an ES module whose default export is the extension (repeatable)
   --server-port <port>   The proxy's port (default ${DEFAULT_SERVER_PORT})
   --client-port <port>   The page's port (default ${DEFAULT_CLIENT_PORT})
-  --provider <name>      Who stands in for Alexa+'s model: anthropic, bedrock or openai (default: the first with credentials, in that order)
-  --model <id>           The model (default ${DEFAULT_MODELS.anthropic}, ${DEFAULT_MODELS.bedrock} on Bedrock, ${DEFAULT_MODELS.openai} on OpenAI)
+  --provider <name>      Who stands in for Alexa+'s model: anthropic, foundry, bedrock, gemini or openai
+                         (default: the first with credentials, in that order)
+  --model <id>           The model, or on Microsoft Foundry the deployment (default ${DEFAULT_MODELS.anthropic}, ${DEFAULT_MODELS.foundry} on
+                         Foundry, ${DEFAULT_MODELS.bedrock} on Bedrock, ${DEFAULT_MODELS.gemini} on Gemini, ${DEFAULT_MODELS.openai} on OpenAI)
   --region <region>      Bedrock's AWS Region (default AWS_REGION, AWS_DEFAULT_REGION or us-east-1)
+  --foundry-api <api>    Which API a Foundry deployment speaks, anthropic or openai, when its name doesn't say
+                         (default: anthropic for a name with "claude" in it)
   --no-fallbacks         Leave Anthropic's refusal fallback off (for a gateway that doesn't pass it through)
   --open                 Open the simulator in the browser
   --verbose              Log every exchange
@@ -48,8 +52,10 @@ Options:
                          link registers a client for testing when the authorization server allows it
   --callback-port <port> link: where the sign-in comes back, as http://127.0.0.1:<port>/callback (default ${DEFAULT_CALLBACK_PORT})
 
-Talking needs a model: ANTHROPIC_API_KEY (and ANTHROPIC_BASE_URL for a gateway); AWS_BEARER_TOKEN_BEDROCK, or
-AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN), for Bedrock; or OPENAI_API_KEY (and
+Talking needs a model: ANTHROPIC_API_KEY (and ANTHROPIC_BASE_URL for a gateway); ANTHROPIC_FOUNDRY_API_KEY (or
+AZURE_OPENAI_AUTH_TOKEN) with ANTHROPIC_FOUNDRY_RESOURCE (or ANTHROPIC_FOUNDRY_BASE_URL) for Microsoft Foundry;
+AWS_BEARER_TOKEN_BEDROCK, or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN), for Bedrock;
+GEMINI_API_KEY or GOOGLE_API_KEY (and GOOGLE_GEMINI_BASE_URL for a gateway) for Gemini; or OPENAI_API_KEY (and
 OPENAI_BASE_URL for Azure OpenAI, Ollama, LM Studio, Groq or another server that speaks its API). The Tools
 tab works without one.
 ${DISCLAIMER}`;
@@ -68,6 +74,7 @@ const OPTIONS = {
   provider: { type: "string" },
   model: { type: "string" },
   region: { type: "string" },
+  "foundry-api": { type: "string" },
   "no-fallbacks": { type: "boolean" },
   open: { type: "boolean" },
   verbose: { type: "boolean" },
@@ -227,10 +234,12 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
   const calls = await readCalls(values.calls);
   const tokens = await signIn(upstream, values, io);
   const provider = values.provider;
-  if (provider !== undefined && !isProviderName(provider)) throw new UsageError(`--provider takes anthropic, bedrock or openai, not ${JSON.stringify(provider)}.`);
+  if (provider !== undefined && !isProviderName(provider)) throw new UsageError(`--provider takes anthropic, foundry, bedrock, gemini or openai, not ${JSON.stringify(provider)}.`);
   if (values.region !== undefined && !isAwsRegion(values.region)) throw new UsageError(`${values.region} isn't an AWS Region, like us-east-1.`);
+  const foundryApi = values["foundry-api"];
+  if (foundryApi !== undefined && !isFoundryApi(foundryApi)) throw new UsageError(`--foundry-api takes anthropic or openai, not ${JSON.stringify(foundryApi)}.`);
   // The provider and its model, from the flags and the credentials in the environment.
-  const model = setUpModel(modelOptionsFromEnv(io.env, { provider, model: values.model, region: values.region, fallbacks: !values["no-fallbacks"] }));
+  const model = setUpModel(modelOptionsFromEnv(io.env, { provider, model: values.model, region: values.region, fallbacks: !values["no-fallbacks"], foundryApi }));
   const phrases = examplePhrases(addon);
   // Each extension is served by the proxy for the page to import; read now, so a missing file says so at the start.
   const extensions = await Promise.all(

@@ -18,8 +18,15 @@ export class TurnError extends Error {
   }
 }
 
-/** A block of a reply: what the model said, or a tool it wants called. */
-export type ReplyBlock = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
+/**
+ * A block of a reply: what the model said, or a tool it wants called. A block
+ * from Gemini can carry its thought signature, which Gemini needs back on the
+ * same part in the next request; the page passes blocks back as they came, so it
+ * rides along there.
+ */
+export type ReplyBlock =
+  | { type: "text"; text: string; thought_signature?: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown>; thought_signature?: string };
 
 /**
  * A reply in the Messages API's shape, which is what the page reads whichever
