@@ -10,6 +10,22 @@ import { clip, describeError, isObject, type JsonObject } from "../check/rpc.ts"
 /** Something that stops linking, said plainly; the CLI prints it and exits with 1. */
 export class LinkError extends Error {}
 
+/**
+ * An authorization server endpoint's answer that wasn't what was asked for:
+ * its HTTP status, and the OAuth error code when it sent one (like
+ * invalid_grant), so a caller can tell a refusal that will stand from trouble
+ * that may pass.
+ */
+export class EndpointError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
 /** How the client proves itself at the token endpoint, by the names RFC 7591 and RFC 8414 use. */
 export type ClientAuth = "client_secret_basic" | "client_secret_post" | "none";
 export const CLIENT_AUTHS: readonly ClientAuth[] = ["client_secret_basic", "client_secret_post", "none"];
@@ -63,7 +79,7 @@ async function post(fetchFn: typeof fetch, url: string, init: RequestInit, what:
   const text = await response.text();
   if (response.status >= 300 && response.status < 400) {
     const location = response.headers.get("location");
-    throw new Error(`the ${what} answered with a redirect (HTTP ${response.status}${location ? ` to ${location}` : ""}); name its final address in the metadata`);
+    throw new EndpointError(`the ${what} answered with a redirect (HTTP ${response.status}${location ? ` to ${location}` : ""}); name its final address in the metadata`, response.status);
   }
   let json: unknown;
   try {
@@ -72,10 +88,11 @@ async function post(fetchFn: typeof fetch, url: string, init: RequestInit, what:
     json = undefined;
   }
   if (!response.ok) {
-    const said = isObject(json) && typeof json.error === "string" ? `${json.error}${typeof json.error_description === "string" && json.error_description ? ` (${clip(json.error_description, 160)})` : ""}` : clip(text, 120);
-    throw new Error(`the ${what} answered HTTP ${response.status}${said ? `: ${said}` : ""}`);
+    const code = isObject(json) && typeof json.error === "string" ? json.error : undefined;
+    const said = code !== undefined && isObject(json) ? `${code}${typeof json.error_description === "string" && json.error_description ? ` (${clip(json.error_description, 160)})` : ""}` : clip(text, 120);
+    throw new EndpointError(`the ${what} answered HTTP ${response.status}${said ? `: ${said}` : ""}`, response.status, code);
   }
-  if (!isObject(json)) throw new Error(`the ${what} answered HTTP ${response.status} with something that isn't a JSON object: ${clip(text, 80) || "an empty body"}`);
+  if (!isObject(json)) throw new EndpointError(`the ${what} answered HTTP ${response.status} with something that isn't a JSON object: ${clip(text, 80) || "an empty body"}`, response.status);
   return json;
 }
 

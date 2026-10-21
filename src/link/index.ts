@@ -15,7 +15,7 @@ import { DEFAULT_TOKEN_FILE, saveTokens, withAnswer, type SavedTokens } from "./
  */
 
 export { LinkError } from "./oauth.ts";
-export { DEFAULT_TOKEN_FILE, REFRESH_MARGIN_MS, RENEWAL_GRACE_MS, TokenFile, loadTokens, type SavedTokens } from "./tokens.ts";
+export { DEFAULT_TOKEN_FILE, REFRESH_MARGIN_MS, REFRESH_RETRY_MS, RENEWAL_GRACE_MS, TokenFile, loadTokens, type SavedTokens } from "./tokens.ts";
 
 /** Next to the proxy's 6277 and the page's 6274. */
 export const DEFAULT_CALLBACK_PORT = 6278;

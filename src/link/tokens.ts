@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describeError, isObject, type RefreshOutcome, type TokenSource } from "../check/rpc.ts";
-import { CLIENT_AUTHS, tokenRequest, type ClientAuth, type TokenAnswer } from "./oauth.ts";
+import { CLIENT_AUTHS, EndpointError, tokenRequest, type ClientAuth, type TokenAnswer } from "./oauth.ts";
 
 /**
  * The token file link saves and --token-file reads: the tokens, and what
@@ -17,6 +17,23 @@ export const DEFAULT_TOKEN_FILE = ".alexa-plus-simulator/tokens.json";
 export const REFRESH_MARGIN_MS = 60_000;
 /** A token refused this soon after a refresh brought it is refused for some other reason, so refreshing again won't help. */
 export const RENEWAL_GRACE_MS = 30_000;
+/** After a refresh fails in a way that may pass (the token endpoint out of reach, or a 5xx), how long until it's tried again. */
+export const REFRESH_RETRY_MS = 30_000;
+
+type Failure = Exclude<RefreshOutcome, { status: "refreshed" }>;
+
+/**
+ * Whether a refresh that failed this way will fail again however often it's
+ * tried: no refresh token, no secret, or the token endpoint refusing the
+ * request itself (a 4xx, invalid_grant above all), which only linking again
+ * or setting the secret mends. Anything else (the endpoint out of reach, too
+ * slow, failing with a 5xx) may pass.
+ */
+function lasting(outcome: Failure, error?: unknown): boolean {
+  if (outcome.status !== "failed") return true;
+  if (!(error instanceof EndpointError)) return false;
+  return (error.status >= 400 && error.status < 500) || error.code === "invalid_grant";
+}
 
 export interface SavedTokens {
   version: 1;
@@ -117,10 +134,12 @@ export interface TokenFileOptions {
 export class TokenFile implements TokenSource {
   private saved: SavedTokens;
   private refreshing: Promise<RefreshOutcome> | undefined;
-  /** The first refresh's outcome, for AU-09. */
-  private first: RefreshOutcome | undefined;
-  /** The first refresh that didn't work; after it, nothing tries again, since the fix is on the person (link again, or set the secret). */
-  private failure: Exclude<RefreshOutcome, { status: "refreshed" }> | undefined;
+  /** The first refresh that worked, for AU-09. */
+  private worked: RefreshOutcome | undefined;
+  /** The first refresh that failed in a way that will last; after it, nothing tries again, since the fix is on the person (link again, or set the secret). */
+  private failure: Failure | undefined;
+  /** The latest refresh, when it failed in a way that may pass, and when to try again. */
+  private setback: { outcome: Failure; retryAt: number } | undefined;
   /** When each access token that came from refreshing after a 401 arrived, so a server refusing every token can't set off a refresh per request. */
   private readonly renewedAt = new Map<string, number>();
   private warned = false;
@@ -147,14 +166,15 @@ export class TokenFile implements TokenSource {
 
   /** The access token to send, refreshed first when it expires within a minute. */
   async token(): Promise<string> {
-    if (this.due() && !this.failure) {
+    if (this.due() && !this.failure && !this.waiting()) {
       const outcome = await this.refreshOnce();
       if (outcome.status !== "refreshed" && !this.expired()) {
         this.warnOnce(`${this.couldnt(outcome)} The saved access token still works until ${this.saved.expiresAt}.`);
       }
     }
-    if (this.failure && this.expired()) {
-      throw new Error(`The sign-in saved in ${this.path} has expired and couldn't be refreshed: ${this.why(this.failure)}.${this.fix(this.failure)}`);
+    const stopped = this.failure ?? this.setback?.outcome;
+    if (stopped && this.expired()) {
+      throw new Error(`The sign-in saved in ${this.path} has expired and couldn't be refreshed: ${this.why(stopped)}.${this.fix(stopped)}`);
     }
     return this.saved.accessToken;
   }
@@ -163,8 +183,9 @@ export class TokenFile implements TokenSource {
   async renew(rejected: string): Promise<string | undefined> {
     // A refresh for another request already replaced it.
     if (rejected !== this.saved.accessToken) return this.saved.accessToken;
-    if (this.failure) {
-      this.warnOnce(`The MCP server refused the saved access token. ${this.couldnt(this.failure)}`);
+    const stopped = this.failure ?? (this.waiting() ? this.setback?.outcome : undefined);
+    if (stopped) {
+      this.warnOnce(`The MCP server refused the saved access token. ${this.couldnt(stopped)}`);
       return undefined;
     }
     const renewed = this.renewedAt.get(rejected);
@@ -183,13 +204,18 @@ export class TokenFile implements TokenSource {
     return this.saved.accessToken;
   }
 
-  /** For AU-09: the first refresh that didn't work, or else the first one that did, refreshing now when none has run. */
+  /** For AU-09: a refresh that failed in a way that will last, or else the first one that worked, refreshing now when neither has happened. */
   async confirmRefresh(): Promise<RefreshOutcome> {
-    return this.failure ?? this.first ?? (await this.refreshOnce());
+    return this.failure ?? this.worked ?? (await this.refreshOnce());
   }
 
   private due(): boolean {
     return this.saved.expiresAt !== undefined && this.now() >= Date.parse(this.saved.expiresAt) - REFRESH_MARGIN_MS;
+  }
+
+  /** Whether a refresh failed moments ago in a way that may pass, so it isn't tried again yet. */
+  private waiting(): boolean {
+    return this.setback !== undefined && this.now() < this.setback.retryAt;
   }
 
   private expired(): boolean {
@@ -204,19 +230,31 @@ export class TokenFile implements TokenSource {
     return this.refreshing;
   }
 
+  /**
+   * One refresh, remembered by how it went: one that worked for AU-09, one
+   * that will fail however often it's tried for good, and one that may pass
+   * (a network error, a 5xx) only until it's time to try again, so a moment's
+   * trouble at the token endpoint can't end refreshing for the rest of the run.
+   */
   private async refresh(): Promise<RefreshOutcome> {
-    const outcome = await this.attempt();
-    this.first ??= outcome;
-    if (outcome.status !== "refreshed") this.failure ??= outcome;
+    const { outcome, error } = await this.attempt();
+    if (outcome.status === "refreshed") {
+      this.worked ??= outcome;
+      this.setback = undefined;
+    } else if (lasting(outcome, error)) {
+      this.failure ??= outcome;
+    } else {
+      this.setback = { outcome, retryAt: this.now() + REFRESH_RETRY_MS };
+    }
     return outcome;
   }
 
-  private async attempt(): Promise<RefreshOutcome> {
+  private async attempt(): Promise<{ outcome: RefreshOutcome; error?: unknown }> {
     const saved = this.saved;
-    if (!saved.refreshToken) return { status: "missing" };
+    if (!saved.refreshToken) return { outcome: { status: "missing" } };
     const secret = saved.clientSecret ?? this.options.env.ALEXA_SIM_CLIENT_SECRET;
     if (saved.clientAuth !== "none" && !secret) {
-      return { status: "untried", reason: "refreshing needs the client's secret, so set ALEXA_SIM_CLIENT_SECRET (the token file never holds a secret you made)" };
+      return { outcome: { status: "untried", reason: "refreshing needs the client's secret, so set ALEXA_SIM_CLIENT_SECRET (the token file never holds a secret you made)" } };
     }
     let answer: TokenAnswer;
     try {
@@ -228,7 +266,7 @@ export class TokenFile implements TokenSource {
         { id: saved.clientId, ...(secret ? { secret } : {}), auth: saved.clientAuth },
       );
     } catch (error) {
-      return { status: "failed", problem: describeError(error) };
+      return { outcome: { status: "failed", problem: describeError(error) }, error };
     }
     this.saved = withAnswer(saved, answer, this.now());
     try {
@@ -237,23 +275,27 @@ export class TokenFile implements TokenSource {
       this.warnOnce(`Refreshed the sign-in, but couldn't save the new tokens to ${this.path} (${describeError(error)}), so they last only while this runs.`);
     }
     return {
-      status: "refreshed",
-      sameAccessToken: answer.accessToken === saved.accessToken,
-      newRefreshToken: Boolean(answer.refreshToken && answer.refreshToken !== saved.refreshToken),
+      outcome: {
+        status: "refreshed",
+        sameAccessToken: answer.accessToken === saved.accessToken,
+        newRefreshToken: Boolean(answer.refreshToken && answer.refreshToken !== saved.refreshToken),
+      },
     };
   }
 
-  private why(outcome: Exclude<RefreshOutcome, { status: "refreshed" }>): string {
+  private why(outcome: Failure): string {
     if (outcome.status === "missing") return "it has no refresh token, since the token endpoint didn't return one";
     return outcome.status === "failed" ? outcome.problem : outcome.reason;
   }
 
-  /** What to do about it: set the secret when that's what's missing, and otherwise sign in again. */
-  private fix(outcome: Exclude<RefreshOutcome, { status: "refreshed" }>): string {
-    return outcome.status === "untried" ? "" : ` Run alexa-plus-simulator link ${this.saved.mcpUrl} to sign in again.`;
+  /** What to do about it: set the secret when that's what's missing, wait when it may pass, and otherwise sign in again. */
+  private fix(outcome: Failure): string {
+    if (outcome.status === "untried") return "";
+    if (outcome === this.setback?.outcome) return ` That may pass, so it's tried again ${REFRESH_RETRY_MS / 1000} seconds later.`;
+    return ` Run alexa-plus-simulator link ${this.saved.mcpUrl} to sign in again.`;
   }
 
-  private couldnt(outcome: Exclude<RefreshOutcome, { status: "refreshed" }>): string {
+  private couldnt(outcome: Failure): string {
     return `Couldn't refresh the sign-in saved in ${this.path}: ${this.why(outcome)}.${this.fix(outcome)}`;
   }
 

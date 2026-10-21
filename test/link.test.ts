@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runChecks } from "../src/check/index.ts";
-import { LinkError, REFRESH_MARGIN_MS, RENEWAL_GRACE_MS, TokenFile, link, loadTokens, type LinkOptions, type SavedTokens } from "../src/link/index.ts";
+import { LinkError, REFRESH_MARGIN_MS, REFRESH_RETRY_MS, RENEWAL_GRACE_MS, TokenFile, link, loadTokens, type LinkOptions, type SavedTokens } from "../src/link/index.ts";
 import { startProxy, type RunningProxy } from "../src/proxy/index.ts";
 import type { ReadinessReport } from "../src/shared/contract.ts";
 import { FakeAuth, type FakeAuthOptions } from "./fake-auth.ts";
@@ -362,6 +362,52 @@ describe("a token file in use", () => {
     await expect(tokenFile.token()).rejects.toThrow(expected);
     await expect(runChecks({ serverUrl: auth.mcpUrl, token: tokenFile, now: () => 0 })).rejects.toThrow(expected);
     // It tried once, and doesn't keep knocking.
+    expect(refreshGrants(auth)).toHaveLength(1);
+  });
+
+  it.each([
+    ["can't be reached", () => Promise.reject(new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), { code: "ECONNREFUSED" }) })), "ECONNREFUSED"],
+    ["answers 503", () => Promise.resolve(Response.json({ error: "temporarily_unavailable" }, { status: 503 })), "HTTP 503"],
+  ] as const)("tries again later when the token endpoint %s for a moment, rather than giving up on refreshing", async (_, trouble, said) => {
+    const auth = await fake({ registration: true });
+    const { file, tokens } = await linked(auth);
+    let down = true;
+    const fetchFn: typeof fetch = (input, init) => (down ? trouble() : fetch(input, init));
+    const warnings: string[] = [];
+    let clock = Date.parse(tokens.expiresAt!) - REFRESH_MARGIN_MS + 1;
+    const tokenFile = await TokenFile.load(file, { env: {}, now: () => clock, fetch: fetchFn, warn: (line) => warnings.push(line) });
+
+    // Due for a refresh that can't happen yet: the saved token still works, and it says so once.
+    expect(await tokenFile.token()).toBe(tokens.accessToken);
+    expect(warnings).toEqual([expect.stringContaining(said)]);
+    expect(warnings[0]).toContain(`it's tried again ${REFRESH_RETRY_MS / 1000} seconds later`);
+    expect(warnings[0]).not.toContain("alexa-plus-simulator link");
+    // Expired and still in the pause: the sign-in says why it can't go on, and that it will try again.
+    clock = Date.parse(tokens.expiresAt!) + 1000;
+    await expect(tokenFile.token()).rejects.toThrow(`has expired and couldn't be refreshed: `);
+    await expect(tokenFile.renew(tokens.accessToken)).resolves.toBeUndefined();
+    expect(refreshGrants(auth)).toEqual([]);
+
+    // The token endpoint is back, and once the pause is over, the next request refreshes.
+    down = false;
+    clock += REFRESH_RETRY_MS;
+    const fresh = await tokenFile.token();
+    expect(fresh).not.toBe(tokens.accessToken);
+    expect(auth.accessTokens.has(fresh)).toBe(true);
+    expect(refreshGrants(auth)).toHaveLength(1);
+    // AU-09 hears about the refresh that worked, without another.
+    expect(await tokenFile.confirmRefresh()).toMatchObject({ status: "refreshed" });
+    expect(refreshGrants(auth)).toHaveLength(1);
+  });
+
+  it("stops refreshing for good when the token endpoint refuses the client, and says to link again", async () => {
+    const auth = await withClient();
+    const { file, tokens } = await linked(auth, { clientId: "my-client", clientSecret: "s3cret:with/odd chars" });
+    const later = () => Date.parse(tokens.expiresAt!) + 1000;
+    const tokenFile = await TokenFile.load(file, { env: { ALEXA_SIM_CLIENT_SECRET: "not the secret" }, now: later });
+    await expect(tokenFile.token()).rejects.toThrow("the token endpoint answered HTTP 401: invalid_client (Client authentication failed). Run alexa-plus-simulator link");
+    await expect(tokenFile.token()).rejects.toThrow("invalid_client");
+    // A 4xx won't change by asking again.
     expect(refreshGrants(auth)).toHaveLength(1);
   });
 
