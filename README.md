@@ -53,7 +53,7 @@ alexa-plus-simulator link <mcp-url> [options]  Sign in the way Alexa+ account li
 | `--token-file <file>` | The tokens `link` saved, sent like `--token` and refreshed as they expire (not with `--token`); for `link`, where to save them (default `.alexa-plus-simulator/tokens.json`) |
 | `--client-id <id>` | `link`: a client you made, with its secret, if it has one, in `ALEXA_SIM_CLIENT_SECRET` |
 | `--callback-port <port>` | `link`: where the sign-in comes back, `http://127.0.0.1:<port>/callback` (default 6278) |
-| `--header "Name: value"` | Another header on every request to the server (repeatable) |
+| `--header "Name: value"` | Another header on every request to the server, the check's included, for a server behind a gateway that wants one (repeatable) |
 | `--addon <addon.json>` | Your add-on package: its example phrases become suggestions, and the check includes it |
 | `--calls <calls.json>` | Sample calls for the check to make, with arguments; see [Testing tools that need arguments](#testing-tools-that-need-arguments) |
 | `--extension <file.js>` | An extension for the page (repeatable); see [Extending it](#extending-it) |

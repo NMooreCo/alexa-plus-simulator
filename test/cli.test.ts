@@ -1,4 +1,6 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer, request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -19,6 +21,38 @@ function capture(env: Record<string, string | undefined> = {}, openBrowser?: (ur
 }
 
 const ACCEPT = { "content-type": "application/json", accept: "application/json" };
+
+/** A server behind a gateway that refuses any request without a header of its own, as one behind an access proxy does. */
+async function startGateway(target: string, [name, value]: [string, string]) {
+  const upstream = new URL(target);
+  let refused = 0;
+  const server = createServer((request, response) => {
+    if (request.headers[name] !== value) {
+      refused++;
+      response.writeHead(403, { "content-type": "text/plain" }).end("Forbidden by the gateway");
+      return;
+    }
+    const forward = httpRequest({ host: upstream.hostname, port: upstream.port, method: request.method, path: request.url, headers: { ...request.headers, host: upstream.host } }, (answer) => {
+      response.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(response);
+    });
+    forward.on("error", () => response.destroy());
+    request.pipe(forward);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}${upstream.pathname}`,
+    get refused() {
+      return refused;
+    },
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
+  };
+}
 
 describe("the command line", () => {
   let example: { url: string; close: () => Promise<void> };
@@ -186,6 +220,35 @@ describe("the command line", () => {
       sim.stop();
       expect(await done).toBe(0);
     }
+  });
+
+  it("sends --header to a server behind a gateway, from check and from the simulator's check", async () => {
+    const gateway = await startGateway(example.url, ["x-gateway-key", "open-sesame"]);
+    try {
+      const run = capture();
+      expect(await main(["check", gateway.url, "--header", "X-Gateway-Key: open-sesame", "--json"], run.io)).toBe(0);
+      const report = JSON.parse(run.out.join("\n")) as ReadinessReport;
+      expect(report.rules.find((r) => r.id === "DL-01")!.status).toBe("PASS");
+      expect(report.verdict).toBe("READY");
+
+      const sim = capture({});
+      const done = main([gateway.url, "--server-port", "0", "--client-port", "0", "--header", "X-Gateway-Key: open-sesame"], sim.io);
+      const { url } = await sim.running;
+      try {
+        const fromPage = (await (await fetch(`${url}/api/check`, { method: "POST" })).json()) as ReadinessReport;
+        expect(fromPage.rules.find((r) => r.id === "DL-01")!.status).toBe("PASS");
+      } finally {
+        sim.stop();
+        expect(await done).toBe(0);
+      }
+      // Every request the gateway let through carried the header; without it, nothing gets past.
+      expect(gateway.refused).toBe(0);
+    } finally {
+      await gateway.close();
+    }
+    const bad = capture();
+    expect(await main(["check", example.url, "--header", "Two Words: x"], bad.io)).toBe(2);
+    expect(bad.err[0]).toBe(`--header takes "Name: value", and "Two Words" isn't a header name.`);
   });
 
   it("says what's wrong with a calls file before checking anything", async () => {

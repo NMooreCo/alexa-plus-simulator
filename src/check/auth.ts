@@ -28,9 +28,12 @@ export const AUTH_RULES = [
  * linking guide expects a refusal "when a tool is called without a valid
  * token" and some servers only guard the calls. The call is a read-only one
  * the data layer made, so making it again unsigned can't change anything.
+ * The developer's other headers still go, since the server may need them to
+ * be reached at all, but never an Authorization of theirs.
  */
 export async function probeSignIn(transport: Transport, probe: ProbeCall | undefined): Promise<SignIn> {
-  const session = new McpSession(transport);
+  const headers = Object.fromEntries(Object.entries(transport.headers ?? {}).filter(([name]) => name.toLowerCase() !== "authorization"));
+  const session = new McpSession({ ...transport, headers });
   try {
     const init = await session.initialize();
     if (isRefusal(init)) return { challenge: challengeOf(init) };

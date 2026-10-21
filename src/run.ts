@@ -25,7 +25,7 @@ Options:
   --token <token>        Bearer token for a server that needs sign-in (or set MCP_TOKEN)
   --token-file <file>    Tokens from link, sent like --token and refreshed as they expire (not with --token);
                          link: where to save them (default ${DEFAULT_TOKEN_FILE})
-  --header "Name: value" Another header on every request to the server (repeatable)
+  --header "Name: value" Another header on every request to the server, the check's included (repeatable)
   --addon <addon.json>   Your add-on package: its example phrases show as suggestions, and the check includes it
   --calls <calls.json>   Sample calls for the check, like [{ "tool": "get_forecast", "arguments": { "city": "Denver" } }]:
                          made even to a tool not marked read-only, and repeated only for read-only ones
@@ -116,12 +116,19 @@ function port(value: string | undefined, fallback: number): number {
   return n;
 }
 
+/** A header's name as HTTP allows it (RFC 9110's token), so a bad one is a usage problem here rather than a failure on every request. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
 function headers(list: string[] | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const h of list ?? []) {
     const at = h.indexOf(":");
     if (at < 1) throw new UsageError(`--header takes "Name: value", not ${JSON.stringify(h)}.`);
-    out[h.slice(0, at).trim()] = h.slice(at + 1).trim();
+    const name = h.slice(0, at).trim();
+    const value = h.slice(at + 1).trim();
+    if (!HEADER_NAME.test(name)) throw new UsageError(`--header takes "Name: value", and ${JSON.stringify(name)} isn't a header name.`);
+    if (/[\r\n\0]/.test(value)) throw new UsageError(`--header ${name} has a line break in its value.`);
+    out[name] = value;
   }
   return out;
 }
@@ -232,6 +239,7 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
   const upstream = mcpUrl(target);
   const addon = await readAddon(values.addon);
   const calls = await readCalls(values.calls);
+  const extra = headers(values.header);
   const tokens = await signIn(upstream, values, io);
   const provider = values.provider;
   if (provider !== undefined && !isProviderName(provider)) throw new UsageError(`--provider takes anthropic, foundry, bedrock, gemini or openai, not ${JSON.stringify(provider)}.`);
@@ -261,7 +269,7 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
     "/api/check": async (request) => {
       if (request.method !== "POST") return json({ error: { code: "method", message: "POST to run the check." } }, 405);
       try {
-        const report = await runChecks({ serverUrl: upstream, token: tokens.check, calls });
+        const report = await runChecks({ serverUrl: upstream, token: tokens.check, calls, headers: extra });
         return json(addon === undefined ? report : withRules(report, validatePackage(addon)));
       } catch (err) {
         return json({ error: { code: "check_failed", message: err instanceof Error ? err.message : String(err) } }, 500);
@@ -273,7 +281,7 @@ async function simulate(target: string, values: ParsedValues, io: Io): Promise<n
     port: port(values["server-port"], DEFAULT_SERVER_PORT),
     clientPort: port(values["client-port"], DEFAULT_CLIENT_PORT),
     token: tokens.proxy,
-    headers: headers(values.header),
+    headers: extra,
     verbose: values.verbose,
     uiDir: uiDir(),
     routes,
@@ -302,15 +310,16 @@ async function check(target: string, values: ParsedValues, io: Io): Promise<numb
   const serverUrl = mcpUrl(target);
   const addon = await readAddon(values.addon);
   const calls = await readCalls(values.calls);
+  const extra = headers(values.header);
   const tokens = await signIn(serverUrl, values, io);
-  const base = await runChecks({ serverUrl, token: tokens.check, calls });
+  const base = await runChecks({ serverUrl, token: tokens.check, calls, headers: extra });
   let report = addon === undefined ? base : withRules(base, validatePackage(addon));
   if (values.visual) {
     const screenshots = values.screenshots ?? "readiness-screenshots";
     const screens = await checkScreens({
       serverUrl,
       ...(tokens.proxy ? { token: tokens.proxy } : {}),
-      headers: headers(values.header),
+      headers: extra,
       uiDir: uiDir(),
       outDir: screenshots,
       // A sample call for a screen whose tool needs arguments shows that screen too.

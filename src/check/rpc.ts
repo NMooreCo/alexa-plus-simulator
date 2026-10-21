@@ -22,6 +22,21 @@ export interface Transport {
   now: () => number;
   /** How long one request may take before it counts as hung. */
   timeoutMs: number;
+  /**
+   * The developer's own headers (the CLI's --header), on every request to the
+   * server's origin: its MCP endpoint and its documents, never another origin's.
+   */
+  headers?: Record<string, string>;
+}
+
+/**
+ * The developer's headers with the check's own on top, so the protocol's
+ * headers and the token are always what the check means to send.
+ */
+function headersWith(own: Record<string, string>, developers: Record<string, string> | undefined): Headers {
+  const headers = new Headers(developers);
+  for (const [name, value] of Object.entries(own)) headers.set(name, value);
+  return headers;
 }
 
 /** How a refresh of a saved sign-in went, for AU-09. */
@@ -310,15 +325,15 @@ export class McpSession {
     }
   }
 
-  private headers(): Record<string, string> {
-    const headers: Record<string, string> = {
+  private headers(): Headers {
+    const own: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
     };
-    if (this.bearer) headers.Authorization = `Bearer ${this.bearer}`;
-    if (this.sessionId) headers["Mcp-Session-Id"] = this.sessionId;
-    if (this.protocolVersion) headers["Mcp-Protocol-Version"] = this.protocolVersion;
-    return headers;
+    if (this.bearer) own.Authorization = `Bearer ${this.bearer}`;
+    if (this.sessionId) own["Mcp-Session-Id"] = this.sessionId;
+    if (this.protocolVersion) own["Mcp-Protocol-Version"] = this.protocolVersion;
+    return headersWith(own, this.transport.headers);
   }
 
   private post(message: unknown, deadline: Deadline): Promise<Response> {
@@ -427,7 +442,7 @@ export async function legacySseEndpoint(transport: Transport, token?: string): P
       Promise.resolve().then(() =>
         transport.fetch(transport.url, {
           method: "GET",
-          headers: { Accept: "text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          headers: headersWith({ Accept: "text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, transport.headers),
           signal: deadline.signal,
         }),
       ),
@@ -462,13 +477,17 @@ export interface Fetched {
   problem?: string;
 }
 
-/** GETs a metadata document. */
-export async function getJson(transport: Pick<Transport, "fetch" | "timeoutMs">, url: string): Promise<Fetched> {
+/**
+ * GETs a metadata document. The developer's headers go along only when the
+ * document is on the MCP server's own origin: an authorization server
+ * elsewhere is someone else's, and gets none of them.
+ */
+export async function getJson(transport: Pick<Transport, "fetch" | "timeoutMs"> & Partial<Pick<Transport, "url" | "headers">>, url: string): Promise<Fetched> {
   const deadline = new Deadline(transport.timeoutMs);
+  const ours = transport.url !== undefined && new URL(url).origin === new URL(transport.url).origin;
+  const headers = headersWith({ Accept: "application/json" }, ours ? transport.headers : undefined);
   try {
-    const response = await deadline.race(
-      Promise.resolve().then(() => transport.fetch(url, { headers: { Accept: "application/json" }, signal: deadline.signal })),
-    );
+    const response = await deadline.race(Promise.resolve().then(() => transport.fetch(url, { headers, signal: deadline.signal })));
     const text = await deadline.race(response.text());
     if (!response.ok) return { url, status: response.status, problem: `HTTP ${response.status}` };
     let parsed: unknown;

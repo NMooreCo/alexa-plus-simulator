@@ -35,6 +35,12 @@ export interface CheckOptions {
    * counts in DL-04, DL-05, DL-07 (read-only tools only) and DL-08.
    */
   calls?: ToolCall[];
+  /**
+   * Headers of your own (the CLI's --header), sent on every request the check
+   * makes to the server's origin, as the simulator's proxy sends them: for a
+   * server behind a gateway that wants one, say. Never sent to another origin.
+   */
+  headers?: Record<string, string>;
   /** For tests. */
   fetch?: typeof fetch;
   /** How long one request may take before the rule that needed it fails. */
@@ -63,6 +69,7 @@ export async function runChecks(options: CheckOptions): Promise<ReadinessReport>
     fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
     now: options.now ?? (() => performance.now()),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    ...(options.headers ? { headers: options.headers } : {}),
   };
   const dataLayer = await checkDataLayer(transport, token, calls);
   // Without a token the data layer's own requests show whether sign-in is needed; with one, ask again without it.

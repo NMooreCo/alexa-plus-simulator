@@ -104,6 +104,31 @@ describe("what the check sends", () => {
     expect(server.sent.some((s) => s.httpMethod === "DELETE")).toBe(false);
   });
 
+  it("sends the developer's headers on every request to the server's origin, under its own, and never to another origin", async () => {
+    const server = fakeServer({
+      auth: { token: "t0ken" },
+      documents: {
+        "/.well-known/oauth-protected-resource": { resource: SERVER_URL, authorization_servers: ["https://auth.example.com"] },
+        "/.well-known/oauth-authorization-server": { issuer: "https://auth.example.com" },
+      },
+    });
+    const headers = { "X-Gateway-Key": "open-sesame", Accept: "text/html", Authorization: "Bearer theirs" };
+    await check(server, { token: "t0ken", headers });
+    const ours = server.sent.filter((s) => new URL(s.url).origin === "https://addon.example.com");
+    // Every MCP request (the token-less probe's included), the session's end and the metadata on the server's origin.
+    expect(ours.map((s) => s.httpMethod)).toContain("DELETE");
+    expect(ours.some((s) => s.url.endsWith("/.well-known/oauth-protected-resource"))).toBe(true);
+    for (const sent of ours) expect(sent.headers.get("x-gateway-key"), `${sent.httpMethod} ${sent.url}`).toBe("open-sesame");
+    // The check's own headers win: the Accept it means to send, and the token rather than an Authorization of the developer's.
+    for (const post of ours.filter((s) => s.httpMethod === "POST")) expect(post.headers.get("accept")).toBe("application/json, text/event-stream");
+    const mcp = ours.filter((s) => new URL(s.url).pathname === "/mcp" && s.httpMethod === "POST");
+    expect(new Set(mcp.map((s) => s.headers.get("authorization")))).toEqual(new Set(["Bearer t0ken", null]));
+    // The authorization server is another origin's, and hears none of them.
+    const theirs = server.sent.filter((s) => new URL(s.url).origin === "https://auth.example.com");
+    expect(theirs.length).toBeGreaterThan(0);
+    for (const sent of theirs) expect(sent.headers.get("x-gateway-key")).toBeNull();
+  });
+
   it("never calls a tool that isn't marked read-only, or one that needs arguments", async () => {
     const tools: FakeTool[] = [
       { ...FORECAST_TOOL, annotations: { readOnlyHint: false } },
