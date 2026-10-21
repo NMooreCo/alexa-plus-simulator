@@ -163,7 +163,7 @@ describe("AU-03 protected resource metadata", () => {
   });
 
   it("fails when there's none, and looks for the authorization server at the MCP server's origin", async () => {
-    const server = fakeServer({ auth: { token: TOKEN }, documents: { [ROOT_AS]: AS_METADATA } });
+    const server = fakeServer({ auth: { token: TOKEN }, documents: { [ROOT_AS]: { ...AS_METADATA, issuer: "https://addon.example.com" } } });
     const { rule } = await check(server);
     expect(rule("AU-03")).toMatchObject({ status: "FAIL", notes: expect.stringContaining("No protected resource metadata") });
     expect(rule("AU-04")).toMatchObject({ status: "PASS", notes: expect.stringContaining("MCP server's origin") });
@@ -183,9 +183,37 @@ describe("AU-04 authorization server metadata", () => {
     ["appended to the path", "/tenant-1/.well-known/oauth-authorization-server"],
   ])("finds an issuer with a path when the metadata is %s", async (_, path) => {
     const prm = { ...PRM, authorization_servers: ["https://auth.example.com/tenant-1"] };
-    const server = fakeServer({ auth: { token: TOKEN }, documents: { [ROOT_PRM]: prm, [path]: AS_METADATA } });
+    const server = fakeServer({ auth: { token: TOKEN }, documents: { [ROOT_PRM]: prm, [path]: { ...AS_METADATA, issuer: "https://auth.example.com/tenant-1" } } });
     const { rule } = await check(server);
-    expect(rule("AU-04")).toMatchObject({ status: "PASS", notes: `Found at https://auth.example.com${path}.` });
+    expect(rule("AU-04")).toMatchObject({ status: "PASS", notes: `Found at https://auth.example.com${path}, for issuer https://auth.example.com/tenant-1.` });
+  });
+
+  it("fails, and judges nothing from it, when the only metadata found is another issuer's, like the root's for an issuer with a path", async () => {
+    const prm = { ...PRM, authorization_servers: ["https://auth.example.com/tenant-1"] };
+    const server = fakeServer({ auth: { token: TOKEN }, documents: { [ROOT_PRM]: prm, [ROOT_AS]: AS_METADATA } });
+    const { rule } = await check(server);
+    expect(rule("AU-04").status).toBe("FAIL");
+    expect(rule("AU-04").notes).toContain("No authorization server metadata for https://auth.example.com/tenant-1 names it as the issuer");
+    expect(rule("AU-04").notes).toContain("https://auth.example.com/.well-known/oauth-authorization-server names issuer https://auth.example.com.");
+    expect(rule("AU-04").notes).toContain("RFC 8414");
+    for (const id of ["AU-05", "AU-06", "AU-07"]) expect(rule(id)).toMatchObject({ status: "SKIP", notes: "There's no authorization server metadata to judge (see AU-04)." });
+  });
+
+  it("passes over another issuer's metadata to the authorization server's own", async () => {
+    const prm = { ...PRM, authorization_servers: ["https://auth.example.com/tenant-1"] };
+    const documents = {
+      [ROOT_PRM]: prm,
+      [`${ROOT_AS}/tenant-1`]: { ...AS_METADATA, issuer: "https://auth.example.com/tenant-2" },
+      ["/tenant-1/.well-known/oauth-authorization-server"]: { ...AS_METADATA, issuer: "https://auth.example.com/tenant-1/" },
+    };
+    const { rule } = await check(fakeServer({ auth: { token: TOKEN }, documents }));
+    expect(rule("AU-04")).toMatchObject({ status: "PASS", notes: expect.stringContaining("Found at https://auth.example.com/tenant-1/.well-known/oauth-authorization-server") });
+  });
+
+  it("fails metadata that names no issuer", async () => {
+    const { issuer: _, ...noIssuer } = AS_METADATA;
+    const { rule } = await check(signedIn({}, { [ROOT_AS]: noIssuer }));
+    expect(rule("AU-04")).toMatchObject({ status: "FAIL", notes: expect.stringContaining("oauth-authorization-server names no issuer") });
   });
 
   it("tries RFC 8414's path insertion first", () => {

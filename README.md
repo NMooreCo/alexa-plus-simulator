@@ -109,7 +109,7 @@ Each rule quotes the requirement it checks, with a link, in the report itself. O
 | DL-06 Error handling | A call to a tool that doesn't exist gets a JSON-RPC error or `isError`, never a 5xx, a hang or HTML |
 | DL-07 Repeated calls | The same read-only call twice returns the same result |
 | DL-08 Screens | Each `_meta.ui.resourceUri`, on a tool or in a result, reads back as HTML (otherwise Alexa+ uses its data-only flow) |
-| AU-01 to AU-08 | For a server that needs sign-in: 401 or 403 without a token, no `WWW-Authenticate` header, protected resource metadata at the root path, authorization server metadata, PKCE with S256, the authorization and token endpoints, refresh tokens, and HTTPS |
+| AU-01 to AU-08 | For a server that needs sign-in: 401 or 403 without a token, no `WWW-Authenticate` header, protected resource metadata at the root path, authorization server metadata whose `issuer` is that server (as RFC 8414 requires), PKCE with S256, the authorization and token endpoints, refresh tokens, and HTTPS |
 | AU-09 Token refresh | With a token file from `link`: a refresh with the saved refresh token returns a new access token |
 | VR-01 Renders on both surfaces | With `--visual`: every screen starts and shows something on the Echo Show 5, 8 and 15 |
 | VR-02 Fits the screen | No screen runs off the side of its device |

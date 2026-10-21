@@ -128,7 +128,7 @@ export async function checkAuth(transport: Transport, serverUrl: string, signIn:
   rules.push(asRule);
 
   if (!metadata) {
-    const note = "No authorization server metadata was found (see AU-04).";
+    const note = "There's no authorization server metadata to judge (see AU-04).";
     rules.push(judge(RULES.pkce, "SKIP", note), judge(RULES.endpoints, "SKIP", note), judge(RULES.refreshTokens, "SKIP", note));
   } else {
     rules.push(pkce(metadata), endpoints(metadata), refreshTokens(metadata));
@@ -222,22 +222,45 @@ async function protectedResource(
   };
 }
 
+/**
+ * AU-04. The metadata counts only when its issuer is the authorization server
+ * it was fetched for (the one the protected resource metadata names, or else
+ * the MCP server's origin): RFC 8414 section 3.3 says metadata whose issuer
+ * differs "MUST NOT be used", and the root address tried last may well hold
+ * another server's, which AU-05 to AU-07 would then judge instead.
+ */
 async function authServer(
   transport: Transport,
   issuer: URL | undefined,
   mcpUrl: URL,
 ): Promise<{ rule: RuleResult; metadata?: JsonObject }> {
   const rule = RULES.authServer;
+  const expected = issuer?.href ?? mcpUrl.origin;
   const tried: string[] = [];
+  const others: string[] = [];
   for (const url of authServerMetadataUrls(issuer ?? new URL(mcpUrl.origin))) {
     const fetched = await getJson(transport, url);
-    if (fetched.json) {
-      const where = issuer ? "" : ", at the MCP server's origin since no protected resource metadata named an authorization server";
-      return { rule: judge(rule, "PASS", `Found at ${url}${where}.`), metadata: fetched.json };
+    if (!fetched.json) {
+      tried.push(`${url} (${fetched.problem})`);
+      continue;
     }
-    tried.push(`${url} (${fetched.problem})`);
+    const named = fetched.json.issuer;
+    if (typeof named === "string" && sameResource(named, expected)) {
+      const where = issuer ? "" : ", at the MCP server's origin since no protected resource metadata named an authorization server";
+      return { rule: judge(rule, "PASS", `Found at ${url}, for issuer ${clip(named, 100)}${where}.`), metadata: fetched.json };
+    }
+    others.push(`${url} names ${typeof named === "string" && named ? `issuer ${clip(named, 100)}` : "no issuer"}`);
   }
   const whose = issuer ? `for ${issuer.href}` : "at the MCP server's origin (no protected resource metadata named an authorization server)";
+  if (others.length) {
+    return {
+      rule: judge(
+        rule,
+        "FAIL",
+        `No authorization server metadata ${whose} names it as the issuer: ${listOf(others)}. RFC 8414 says metadata whose issuer isn't the authorization server's own must not be used, so AU-05 to AU-07 aren't judged from it.`,
+      ),
+    };
+  }
   return { rule: judge(rule, "FAIL", `No authorization server metadata ${whose}; tried ${listOf(tried)}.`) };
 }
 
