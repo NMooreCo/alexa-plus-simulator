@@ -36,7 +36,7 @@ It exits with 1 when something fails, so it can gate a pull request ([docs/ci.md
 
 ![The HTML report's screen rules and screenshots](docs/images/report-screens.png)
 
-- **Checks your package.** `validate addon.json` checks an add-on package against the quickstart's schema reference: lengths, example phrases, HTTPS links, image sizes and formats.
+- **Checks your package.** `validate addon.json` checks an add-on package against the quickstart's schema reference: lengths, example phrases, HTTPS links, image sizes and formats. [`examples/addon.json`](examples/addon.json) passes every rule, to start yours from.
 
 ## Usage
 
@@ -195,6 +195,7 @@ Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) 
 ```bash
 git clone https://github.com/NMooreCo/alexa-plus-simulator.git
 cd alexa-plus-simulator
+corepack enable         # pnpm, at the version package.json names
 pnpm install && pnpm build
 pnpm example            # a to-do list MCP server with a screen, on port 6280
 node dist/server/cli.js http://127.0.0.1:6280/mcp --open
@@ -213,9 +214,10 @@ node dist/server/cli.js http://127.0.0.1:6280/mcp --open
 
 ## Development
 
-Node 22 or later and pnpm. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
+Node 22 or later and pnpm, which `corepack enable` sets up (on a Node without corepack, `npm install -g corepack` first). [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 
 ```bash
+corepack enable
 pnpm install
 pnpm check   # build, typecheck and tests
 ```

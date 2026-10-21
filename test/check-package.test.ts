@@ -43,6 +43,13 @@ const EXAMPLE_STATUSES = {
 };
 
 describe("validatePackage", () => {
+  it("passes the example the README points to, every rule of it", () => {
+    const shipped = JSON.parse(readFileSync(new URL("../examples/addon.json", import.meta.url), "utf8")) as unknown;
+    const rules = validatePackage(shipped);
+    expect(rules.filter((r) => r.status !== "PASS").map((r) => `${r.id} ${r.status}: ${r.notes}`)).toEqual([]);
+    expect(rules).toHaveLength(14);
+  });
+
   it("passes Amazon's example shape", () => {
     const rules = validatePackage(example());
     expect(statuses(rules)).toEqual(EXAMPLE_STATUSES);

@@ -4,9 +4,10 @@ Thanks for helping. Issues and pull requests are welcome: bugs, servers it gets 
 
 ## Setup
 
-Node 22 or later and pnpm 9.
+Node 22 or later and pnpm 9, which `corepack enable` sets up from package.json (on a Node without corepack, `npm install -g corepack` first).
 
 ```bash
+corepack enable
 pnpm install
 pnpm check      # build, typecheck and every unit test
 pnpm test:e2e   # the page in a browser (see the README's Development section)

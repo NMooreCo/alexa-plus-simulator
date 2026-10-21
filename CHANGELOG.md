@@ -11,4 +11,4 @@ The first release.
 - **The screen check:** `check --visual` renders every screen on the Echo Show 5, 8 and 15 in a headless browser, saves screenshots, and judges VR-01 to VR-04.
 - **A local proxy** shaped like Amazon's Local Inspector's, for coding agents: `/mcp` (passing a request's own headers on, an extension's included, and following redirects only within your server's origin), `/events`, `/state`, `/health`.
 - **Extensions and the library:** `--extension`, and `alexa-plus-simulator/ui` to host the simulator in your own page, typed, its stylesheet's import included.
-- **An example server** with a screen, to try it with.
+- **An example server** with a screen, to try it with, and an example `addon.json` that passes every package rule.

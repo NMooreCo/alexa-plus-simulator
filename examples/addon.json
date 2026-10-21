@@ -1,0 +1,78 @@
+{
+  "manifestVersion": "1.0",
+  "storeListing": {
+    "distributionCountries": [
+      "US"
+    ],
+    "locales": {
+      "en-US": {
+        "default": "DEFAULT",
+        "name": {
+          "value": "Shared Tasks",
+          "spokenForm": {
+            "format": "ipa",
+            "value": "ˈʃɛɹd ˈtæsks"
+          }
+        },
+        "shortDescription": "A to-do list the whole household shares, on every Echo in the house.",
+        "fullDescription": "Shared Tasks keeps one to-do list for everyone at home. Ask what's left, add something as you think of it, and check things off when they're done; on an Echo Show, the list is on the screen, and a tap checks a task off.",
+        "examplePhrases": [
+          "Alexa, ask Shared Tasks what's on my list",
+          "Alexa, ask Shared Tasks to add milk to my list",
+          "Alexa, ask Shared Tasks to check off watering the tomatoes"
+        ],
+        "privacyAndCompliance": {
+          "privacyPolicyUrl": "https://tasks.example.com/privacy",
+          "termsOfUseUrl": "https://tasks.example.com/terms"
+        },
+        "mediaAssets": {
+          "icons": {
+            "light": [
+              { "size": "72x72", "uri": "https://tasks.example.com/icons/light-72.png" },
+              { "size": "64x64", "uri": "https://tasks.example.com/icons/light-64.png" },
+              { "size": "88x88", "uri": "https://tasks.example.com/icons/light-88.png" },
+              { "size": "126x126", "uri": "https://tasks.example.com/icons/light-126.png" },
+              { "size": "180x180", "uri": "https://tasks.example.com/icons/light-180.png" },
+              { "size": "241x241", "uri": "https://tasks.example.com/icons/light-241.png" }
+            ],
+            "dark": [
+              { "size": "72x72", "uri": "https://tasks.example.com/icons/dark-72.png" },
+              { "size": "64x64", "uri": "https://tasks.example.com/icons/dark-64.png" },
+              { "size": "88x88", "uri": "https://tasks.example.com/icons/dark-88.png" },
+              { "size": "126x126", "uri": "https://tasks.example.com/icons/dark-126.png" },
+              { "size": "180x180", "uri": "https://tasks.example.com/icons/dark-180.png" },
+              { "size": "241x241", "uri": "https://tasks.example.com/icons/dark-241.png" }
+            ]
+          },
+          "carouselImages": [
+            {
+              "uri": "https://tasks.example.com/carousel/list.png",
+              "altText": "The to-do list on an Echo Show, with three tasks and one checked off",
+              "size": "600x900"
+            }
+          ],
+          "bannerImages": [
+            {
+              "uri": "https://tasks.example.com/banner/kitchen.png",
+              "altText": "Shared Tasks on an Echo Show in a kitchen",
+              "size": "1200x600"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "integrations": [
+    {
+      "type": "MCP",
+      "config": {
+        "endpoints": {
+          "default": {
+            "type": "HTTPS",
+            "uri": "https://tasks.example.com/mcp"
+          }
+        }
+      }
+    }
+  ]
+}
