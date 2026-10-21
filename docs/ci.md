@@ -60,6 +60,8 @@ jobs:
 
 A server that needs sign-in takes a token from the `MCP_TOKEN` environment variable (a repository secret, say), so it never appears in the command. (`link` signs in through a browser, so it's for your machine, not CI.)
 
+Without a token, such a server's data layer can't be checked, only its sign-in setup (AU-01 to AU-08). That happens when a workflow's secret isn't there: a pull request from a fork gets no secrets. The check says so rather than passing what it never saw: DL-01 warns that the data layer went unchecked (or, for a server that only guards some requests, each rule it couldn't check warns), so the verdict is CONDITIONAL, never READY, and the notes say to pass a token with `MCP_TOKEN`, `--token` or `--token-file`. Warnings don't fail a build, so to fail such a run, read the report: `jq -e '.warnCount == 0' readiness-report.json`, or skip the job when the secret is empty.
+
 Tools that need arguments are called only when you give sample calls: commit a `calls.json` beside your server and add `--calls calls.json`.
 
 ## The report

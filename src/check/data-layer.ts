@@ -127,8 +127,17 @@ function describe(exchange: Exchange, withToken: boolean): string {
   }
 }
 
+/** How to give the check a token, for a note about what it couldn't check without one. */
+const WITH_A_TOKEN = "Run the check again with a token: --token-file (after alexa-plus-simulator link), --token, or MCP_TOKEN.";
+
+/**
+ * A rule that sign-in kept from being checked is a warning, not a skip: skips
+ * don't count against the verdict, and a server checked without its token (a
+ * pull request from a fork gets no secrets) mustn't come out READY having been
+ * checked for nothing.
+ */
 function signInNote(label: string, status: number | undefined): string {
-  return `The server asks for sign-in for ${label} (HTTP ${status}); run again with a token to check this.`;
+  return `The server asks for sign-in for ${label} (HTTP ${status}), and the check had no token, so this wasn't checked. ${WITH_A_TOKEN}`;
 }
 
 function toolName(tool: unknown): string | undefined {
@@ -182,9 +191,10 @@ export async function checkDataLayer(transport: Transport, token?: TokenSource, 
 async function gather(session: McpSession, transport: Transport, withToken: boolean, calls: Required<ToolCall>[]): Promise<DataLayerFindings> {
   const init = await session.initialize();
   if (!withToken && isRefusal(init)) {
-    const note = `The server asks for sign-in (initialize was refused with HTTP ${init.status}); run again with a token to check the data layer.`;
+    // One warning for the whole data layer, on its first rule, so the verdict says it went unchecked.
+    const note = `The server asks for sign-in (initialize was refused with HTTP ${init.status}), and the check had no token, so none of the data layer (DL-01 to DL-08) was checked. ${WITH_A_TOKEN}`;
     return {
-      rules: DATA_LAYER_RULES.map((rule) => judge(rule, "SKIP", note)),
+      rules: [judge(RULES.streamableHttp, "WARN", note), ...DATA_LAYER_RULES.slice(1).map((rule) => judge(rule, "SKIP", "Not checked without a token (see DL-01)."))],
       signIn: { challenge: challengeOf(init) },
     };
   }
@@ -354,7 +364,7 @@ function toolDefinitions(e: Evidence): RuleResult {
   const rule = RULES.tools;
   if (e.listFailure) {
     const { exchange, problem } = e.listFailure;
-    if (!e.withToken && isRefusal(exchange)) return judge(rule, "SKIP", signInNote("tools/list", exchange.status));
+    if (!e.withToken && isRefusal(exchange)) return judge(rule, "WARN", signInNote("tools/list", exchange.status));
     return judge(rule, "FAIL", `The tools/list request failed: ${problem ?? describe(exchange, e.withToken)}.`);
   }
   const tools = e.tools ?? [];
@@ -466,7 +476,7 @@ function toolResults(e: Evidence): RuleResult {
   if (!e.tools) return judge(rule, "SKIP", LIST_FAILED);
   if (!e.judged.length) return judge(rule, "SKIP", nothingCalled(e));
   const refused = e.withToken ? undefined : e.judged.find((call) => isRefusal(call.first));
-  if (refused) return judge(rule, "SKIP", signInNote(`tools/call ${refused.label}`, refused.first.status));
+  if (refused) return judge(rule, "WARN", signInNote(`tools/call ${refused.label}`, refused.first.status));
   const findings = e.judged.map((call) => resultFinding(call, e.withToken));
   const failures = notesOf(findings, "FAIL");
   const warnings = notesOf(findings, "WARN");
@@ -487,7 +497,7 @@ function errorHandling(e: Evidence): RuleResult {
   const rule = RULES.errors;
   const { exchange } = e.missingTool!;
   const what = "A call to a tool that doesn't exist";
-  if (!e.withToken && isRefusal(exchange)) return judge(rule, "SKIP", signInNote("tools/call", exchange.status));
+  if (!e.withToken && isRefusal(exchange)) return judge(rule, "WARN", signInNote("tools/call", exchange.status));
   if (exchange.status !== undefined && exchange.status >= 500) {
     return judge(rule, "FAIL", `${what} was answered with HTTP ${exchange.status}, which Alexa+ can't recover from.`);
   }
@@ -536,7 +546,7 @@ function repeatedCalls(e: Evidence): RuleResult {
     );
   }
   const refusal = e.withToken ? undefined : readOnly.flatMap((call) => [call.first, ...(call.repeat ? [call.repeat] : [])]).find(isRefusal);
-  if (refusal) return judge(rule, "SKIP", signInNote(refusal.label, refusal.status));
+  if (refusal) return judge(rule, "WARN", signInNote(refusal.label, refusal.status));
   const findings = readOnly.map((call) => repeatFinding(call, e.withToken));
   const problems = [...notesOf(findings, "FAIL"), ...notesOf(findings, "WARN")];
   const passed = notesOf(findings, "PASS");
@@ -562,7 +572,7 @@ function screens(e: Evidence): RuleResult {
     return judge(rule, "SKIP", "No tool declares a screen (_meta.ui.resourceUri), so Alexa+ uses its data-only flow.");
   }
   const refused = e.screens.find((s) => !e.withToken && isRefusal(s.exchange));
-  if (refused) return judge(rule, "SKIP", signInNote(`resources/read ${refused.uri}`, refused.exchange.status));
+  if (refused) return judge(rule, "WARN", signInNote(`resources/read ${refused.uri}`, refused.exchange.status));
   const problems: string[] = [];
   const found: string[] = [];
   for (const { uri, exchange } of e.screens) {

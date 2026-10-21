@@ -52,13 +52,21 @@ const ALL_AUTH_PASS = {
 };
 
 describe("a server that needs sign-in", () => {
-  it("passes every auth rule, and skips the data layer without a token", async () => {
+  it("passes every auth rule, and without a token warns that the data layer went unchecked, so it's never READY", async () => {
     const { report, rule, auth } = await check(signedIn());
     expect(auth).toEqual(ALL_AUTH_PASS);
     expect(rule("AU-01").notes).toBe("An unauthenticated initialize was refused with HTTP 401.");
     expect(rule("AU-03").notes).toContain(`naming resource ${SERVER_URL}`);
-    expect(report.rules.filter((r) => r.category === "mcp-data").every((r) => r.status === "SKIP")).toBe(true);
-    expect(rule("DL-01").notes).toContain("run again with a token");
+    expect(rule("DL-01")).toMatchObject({ status: "WARN", notes: expect.stringContaining("none of the data layer (DL-01 to DL-08) was checked") });
+    expect(rule("DL-01").notes).toContain("--token-file");
+    expect(rule("DL-01").notes).toContain("--token");
+    expect(report.rules.filter((r) => r.category === "mcp-data" && r.id !== "DL-01").every((r) => r.status === "SKIP" && r.notes === "Not checked without a token (see DL-01).")).toBe(true);
+    // A pull request from a fork gets no secrets: the check must not call that ready.
+    expect(report.verdict).toBe("CONDITIONAL");
+  });
+
+  it("is READY for the same server once it has the token", async () => {
+    const { report } = await check(signedIn(), { token: TOKEN });
     expect(report.verdict).toBe("READY");
   });
 
@@ -95,10 +103,13 @@ describe("a server that needs sign-in", () => {
     const without = await check(guarded());
     expect(without.rule("AU-01").notes).toContain("tools/call get_forecast was refused with HTTP 401");
     expect(without.rule("DL-03").status).toBe("PASS");
+    // The tool rules weren't checked, so they warn rather than skip, and say how to check them.
     for (const id of ["DL-05", "DL-06", "DL-07"]) {
-      expect(without.rule(id)).toMatchObject({ status: "SKIP", notes: expect.stringContaining("sign-in") });
+      expect(without.rule(id)).toMatchObject({ status: "WARN", notes: expect.stringContaining("asks for sign-in") });
+      expect(without.rule(id).notes).toContain("--token-file");
     }
     expect(without.auth).toEqual(ALL_AUTH_PASS);
+    expect(without.report.verdict).toBe("CONDITIONAL");
 
     const withToken = await check(guarded(), { token: TOKEN });
     expect(withToken.rule("AU-01").notes).toContain("tools/call get_forecast was refused");

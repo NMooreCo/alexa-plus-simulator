@@ -38,6 +38,8 @@
 
 ## The readiness check
 
+**DL-01 warns that the data layer wasn't checked.** The server asks for sign-in and the check had no token, so it could only judge the sign-in setup. Give it one: `--token-file` with the tokens `link` saved, `--token`, or `MCP_TOKEN`. A rule that warns it "wasn't checked" for the same reason means the server guards some requests (tool calls, say) and not others.
+
 **A rule says SKIP.** Its notes say why. The data layer's tool rules call only tools marked `readOnlyHint: true` that need no arguments, unless you give it sample calls with `--calls calls.json` (`[{ "tool": "get_forecast", "arguments": { "city": "Denver" } }]`); the sign-in rules run only for a server that refuses an unauthenticated request.
 
 **`link` can't sign in.** The redirect it uses is `http://127.0.0.1:6278/callback` (`--callback-port` changes the port), so a client you made needs that redirect registered. Without `--client-id`, it registers a client for testing, which works only when your authorization server allows dynamic registration. Alexa+ itself uses a client you register with Amazon's redirect addresses.
