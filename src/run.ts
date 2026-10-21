@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { buildReport, formatReport, parseCalls, runChecks, type ToolCall, type TokenSource, validatePackage } from "./check/index.ts";
@@ -319,6 +319,7 @@ async function check(target: string, values: ParsedValues, io: Io): Promise<numb
   const calls = await readCalls(values.calls);
   const extra = headers(values.header);
   const tokens = await signIn(serverUrl, values, io);
+  await reportFolders([values.out, values.html]);
   const base = await runChecks({ serverUrl, token: tokens.check, calls, headers: extra });
   let report = addon === undefined ? base : withRules(base, validatePackage(addon));
   if (values.visual) {
@@ -342,6 +343,18 @@ async function check(target: string, values: ParsedValues, io: Io): Promise<numb
   io.out(values.json ? JSON.stringify(report, null, 2) : formatReport(report));
   if (!values.json) for (const file of [values.out, values.html]) if (file) io.out(`Wrote ${file}.`);
   return report.verdict === "NOT_READY" ? 1 : 0;
+}
+
+/** Makes the folders the reports go in, before the check runs, so a path that can't be written is said at the start, not after it. */
+async function reportFolders(files: (string | undefined)[]): Promise<void> {
+  for (const file of files) {
+    if (!file) continue;
+    try {
+      await mkdir(dirname(file), { recursive: true });
+    } catch (err) {
+      throw new UsageError(`Couldn't make the folder for ${file}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 }
 
 async function linkCommand(target: string | undefined, values: ParsedValues, io: Io): Promise<number> {

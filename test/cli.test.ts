@@ -204,6 +204,18 @@ describe("the command line", () => {
     expect((JSON.parse(json.out.join("\n")) as ReadinessReport).serverUrl).toBe(example.url);
   });
 
+  it("writes the reports into folders that don't exist yet", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
+    const out = join(dir, "reports", "today", "readiness-report.json");
+    const html = join(dir, "pages", "readiness.html");
+    const run = capture();
+    const code = await main(["check", example.url, "--out", out, "--html", html], run.io);
+    const report = JSON.parse(await readFile(out, "utf8")) as ReadinessReport;
+    expect(code).toBe(report.verdict === "NOT_READY" ? 1 : 0);
+    expect(await readFile(html, "utf8")).toContain(report.verdict);
+    expect(run.out).toContain(`Wrote ${out}.`);
+  });
+
   it("makes the sample calls in --calls, in check and in the simulator's check", async () => {
     const dir = await mkdtemp(join(tmpdir(), "alexa-sim-"));
     const calls = join(dir, "calls.json");
