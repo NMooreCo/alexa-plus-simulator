@@ -2,13 +2,13 @@
 
 An open, unofficial simulator and readiness check for Alexa+ MCP add-ons. Point it at your MCP server, talk to it on a simulated Echo Show or Echo Dot, see your MCP Apps screens at both of Alexa's screen sizes, watch every request against Alexa+'s 500 ms budget, and check the server against Amazon's published requirements.
 
-> **Unofficial.** Not affiliated with or endorsed by Amazon. Amazon's own tools for this (a web simulator and the Local Inspector) are open to select partners for now; this follows Amazon's published documentation so anyone can build and test an add-on. Passing these checks is a good sign, not a certification.
+> **Unofficial.** Not affiliated with or endorsed by Amazon. Amazon's own tools for this (a web simulator and the Local Inspector) are open to select partners for now; this follows Amazon's published documentation so anyone can build and test an add-on. Passing these checks is a good sign, not a certification. Alexa, Echo and related marks are trademarks of Amazon.com, Inc. or its affiliates.
 
 ```bash
 npx alexa-plus-simulator https://your-server.example.com/mcp
 ```
 
-Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` (or credentials for Microsoft Foundry, Amazon Bedrock, Gemini or OpenAI; see [Models](#models)) to talk to it; without any you can still call every tool by hand and run the readiness check.
+It needs Node 22 or later. Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` (or credentials for Microsoft Foundry, Amazon Bedrock, Gemini or OpenAI; see [Models](#models)) to talk to it; without any you can still call every tool by hand and run the readiness check.
 
 ![The simulator: a to-do list add-on's screen on a simulated Echo Show 8, the spoken answer captioned, and the conversation beside it](docs/images/simulator.png)
 
@@ -191,6 +191,8 @@ Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) 
 ## Try it without a server
 
 ```bash
+git clone https://github.com/NMooreCo/alexa-plus-simulator.git
+cd alexa-plus-simulator
 pnpm install && pnpm build
 pnpm example            # a to-do list MCP server with a screen, on port 6280
 node dist/server/cli.js http://127.0.0.1:6280/mcp --open

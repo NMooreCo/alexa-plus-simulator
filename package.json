@@ -4,6 +4,14 @@
   "description": "An open, unofficial simulator and readiness check for Alexa+ MCP add-ons: point it at your MCP server, talk to it on a simulated Echo Show or Echo Dot, see your MCP Apps screens, and check it against Amazon's published requirements.",
   "license": "MIT",
   "author": "Nick Moore",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NMooreCo/alexa-plus-simulator.git"
+  },
+  "homepage": "https://github.com/NMooreCo/alexa-plus-simulator#readme",
+  "bugs": {
+    "url": "https://github.com/NMooreCo/alexa-plus-simulator/issues"
+  },
   "type": "module",
   "packageManager": "pnpm@9.15.9",
   "engines": {
