@@ -11,6 +11,7 @@ import { DEFAULT_MODELS, isAwsRegion, isFoundryApi, isProviderName, modelOptions
 import { type ProxyOptions, type Route, startProxy } from "./proxy/index.ts";
 import { htmlReport } from "./report/html.ts";
 import { DEFAULT_CLIENT_PORT, DEFAULT_SERVER_PORT, DISCLAIMER, type ReadinessReport, type RuleResult, VERSION } from "./shared/contract.ts";
+import { parseServerUrl } from "./shared/server-url.ts";
 import { checkScreens } from "./visual/index.ts";
 
 export const USAGE = `Alexa+ simulator ${VERSION} (unofficial; not affiliated with Amazon)
@@ -308,6 +309,12 @@ function uiDir(): string {
 
 async function check(target: string, values: ParsedValues, io: Io): Promise<number> {
   const serverUrl = mcpUrl(target);
+  try {
+    parseServerUrl(serverUrl);
+  } catch (err) {
+    // Plain http to another machine, say: a URL the check won't use, so a usage problem, before anything is sent.
+    throw new UsageError((err as Error).message);
+  }
   const addon = await readAddon(values.addon);
   const calls = await readCalls(values.calls);
   const extra = headers(values.header);

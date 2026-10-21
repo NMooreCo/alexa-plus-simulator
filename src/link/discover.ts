@@ -1,7 +1,7 @@
 import { authServerMetadataUrls, sameResource } from "../check/auth.ts";
 import { clip, getJson, isObject, type JsonObject } from "../check/rpc.ts";
 import { SOURCES } from "../check/sources.ts";
-import { isLoopbackHost } from "../proxy/upstream.ts";
+import { isLoopbackHost } from "../shared/server-url.ts";
 import { LinkError } from "./oauth.ts";
 
 /**

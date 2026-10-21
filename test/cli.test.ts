@@ -333,6 +333,11 @@ describe("signing in from the command line", () => {
     const refused = capture();
     expect(await main(["link", "http://example.com/mcp", "--token-file", missing], refused.io)).toBe(1);
     expect(refused.err[0]).toContain("Refusing the MCP server's URL, http://example.com/mcp: it must use https://");
+    // check holds to the same rule, as a usage problem, before sending the token anywhere.
+    const plain = capture();
+    expect(await main(["check", "http://example.com/mcp", "--token", "abc"], plain.io)).toBe(2);
+    expect(plain.err[0]).toBe("Refusing http://example.com: a remote MCP server must use https://. Plain http:// is only allowed on this machine (localhost, 127.0.0.1 or [::1]), for a local dev server.");
+    expect(plain.out).toEqual([]);
   });
 });
 

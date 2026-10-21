@@ -1,5 +1,6 @@
 import { Agent as HttpAgent, request as httpRequest, type ClientRequest, type IncomingMessage, type OutgoingHttpHeaders } from "node:http";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
+import { isLoopbackHost, parseServerUrl } from "../shared/server-url.ts";
 
 /**
  * The MCP server under test, reached with Node's own http and https clients
@@ -14,34 +15,8 @@ const KEEPS_METHOD = new Set([307, 308]);
 const ANY_REDIRECT = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
 
-/** localhost, 127.0.0.0/8 and [::1]: the only hosts a plain http:// upstream may be on. */
-export function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  return host === "localhost" || host === "[::1]" || /^127(\.\d{1,3}){3}$/.test(host);
-}
-
-/**
- * Parses the MCP endpoint under test. Anything but https:// is refused, except
- * http:// on this machine for a local dev server, as Amazon's Local Inspector
- * does: over plain http to a remote host, the bearer token and every tool call
- * would cross the network in the clear.
- */
-export function parseUpstream(upstream: string): URL {
-  let url: URL;
-  try {
-    url = new URL(upstream);
-  } catch {
-    throw new Error(`"${upstream}" isn't a URL. Give the MCP server's full endpoint, like https://example.com/mcp.`);
-  }
-  if (url.protocol === "https:") return url;
-  if (url.protocol === "http:") {
-    if (isLoopbackHost(url.hostname)) return url;
-    throw new Error(
-      `Refusing ${url.origin}: a remote MCP server must use https://. Plain http:// is only allowed on this machine (localhost, 127.0.0.1 or [::1]), for a local dev server.`,
-    );
-  }
-  throw new Error(`Refusing ${upstream}: the MCP server's URL must start with https:// (or http:// for a server on this machine).`);
-}
+/** The MCP endpoint under test: https://, or http:// on this machine only (src/shared/server-url.ts has the rule, which the check shares). */
+export { isLoopbackHost, parseServerUrl as parseUpstream };
 
 /** The server redirected somewhere the proxy won't send a request (plain http to another machine, say). */
 export class RedirectRefused extends Error {}
@@ -71,7 +46,7 @@ export class Upstream {
       response.resume();
       const next = new URL(location, url);
       try {
-        parseUpstream(next.href);
+        parseServerUrl(next.href);
       } catch (error) {
         throw new RedirectRefused(`The MCP server redirected to ${next.href}, which the proxy won't follow. ${(error as Error).message}`);
       }

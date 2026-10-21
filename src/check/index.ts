@@ -1,4 +1,5 @@
 import type { ReadinessReport } from "../shared/contract.ts";
+import { parseServerUrl } from "../shared/server-url.ts";
 import { checkAuth, probeSignIn } from "./auth.ts";
 import { parseCalls, type ToolCall } from "./calls.ts";
 import { checkDataLayer } from "./data-layer.ts";
@@ -21,7 +22,7 @@ export type { RefreshOutcome, TokenSource } from "./rpc.ts";
 export const DEFAULT_TIMEOUT_MS = 10_000;
 
 export interface CheckOptions {
-  /** The MCP endpoint, like https://example.com/mcp. */
+  /** The MCP endpoint, like https://example.com/mcp: https://, or http:// only on this machine, as the proxy takes it. */
   serverUrl: string;
   /**
    * A bearer token for a server that needs one, to check the authenticated
@@ -52,13 +53,8 @@ export interface CheckOptions {
 }
 
 export async function runChecks(options: CheckOptions): Promise<ReadinessReport> {
-  let url: URL;
-  try {
-    url = new URL(options.serverUrl);
-  } catch {
-    throw new TypeError(`${options.serverUrl} isn't a URL.`);
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new TypeError(`${options.serverUrl} isn't an http:// or https:// URL.`);
+  // The proxy's rule, before anything is sent: the token and your headers never cross the network readable.
+  parseServerUrl(options.serverUrl);
   // Checked before anything is sent, so a bad list never leaves the check half done.
   const calls = options.calls === undefined ? [] : parseCalls(options.calls);
   const token = tokenSource(options.token);

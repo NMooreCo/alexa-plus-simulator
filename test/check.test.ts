@@ -401,6 +401,16 @@ describe("the report", () => {
 
   it("refuses a URL it can't check", async () => {
     await expect(runChecks({ serverUrl: "not a url" })).rejects.toThrow(TypeError);
-    await expect(runChecks({ serverUrl: "ftp://example.com/mcp" })).rejects.toThrow("http:// or https://");
+    await expect(runChecks({ serverUrl: "ftp://example.com/mcp" })).rejects.toThrow("must start with https://");
+  });
+
+  it("won't send a token or headers over plain http to another machine, as the proxy won't, but takes http on this one", async () => {
+    const server = fakeServer();
+    for (const serverUrl of ["http://addon.example.com/mcp", "http://192.168.1.20:8787/mcp"]) {
+      await expect(check(server, { serverUrl, token: "t0ken", headers: { "X-Api-Key": "k" } })).rejects.toThrow("a remote MCP server must use https://");
+    }
+    expect(server.sent).toEqual([]);
+    const { rule } = await check(fakeServer(), { serverUrl: "http://127.0.0.1:8787/mcp", token: "t0ken" });
+    expect(rule("DL-01").status).toBe("PASS");
   });
 });

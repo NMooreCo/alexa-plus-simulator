@@ -4,7 +4,7 @@
 
 **"Couldn't connect to ..."** The page's MCP client couldn't initialize. Check that the server is running and that the URL is the MCP endpoint itself (often `/mcp`), then run `alexa-plus-simulator check <url>`: DL-01 says what came back. A server that only speaks the legacy HTTP+SSE transport fails there; Alexa+ needs Streamable HTTP.
 
-**"http:// isn't allowed" at start.** The simulator only talks to `https://` servers, or `http://` on your own machine (`localhost`, `127.0.0.1`, `[::1]`), as Amazon's Local Inspector does. For a server on another machine, use HTTPS or a tunnel such as `cloudflared tunnel --url http://localhost:8787`.
+**"Refusing http://..." at start.** The simulator and the check only talk to `https://` servers, or `http://` on your own machine (`localhost`, `127.0.0.1`, `[::1]`), as Amazon's Local Inspector does, so your token and headers never cross the network readable. For a server on another machine, use HTTPS or a tunnel such as `cloudflared tunnel --url http://localhost:8787`.
 
 **401 or 403.** The server wants sign-in. Sign in once with `alexa-plus-simulator link <url>`, which runs the account-linking flow and saves tokens, then use `--token-file` (it refreshes them as they expire). Or pass an access token you already have with `--token`, or the `MCP_TOKEN` environment variable, which keeps it out of your shell history. The check's AU rules look at your account-linking setup either way.
 
