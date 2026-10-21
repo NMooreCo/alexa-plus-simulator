@@ -23,7 +23,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
   ],
   "keywords": [
     "alexa",
@@ -42,6 +43,7 @@
     "test:e2e": "pnpm build && playwright test",
     "check": "pnpm build && pnpm typecheck && vitest run",
     "example": "node examples/tasks/server.mjs",
+    "notices": "node scripts/notices.mjs",
     "prepublishOnly": "pnpm check"
   },
   "dependencies": {

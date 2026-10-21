@@ -24,6 +24,7 @@ A readiness rule has to check something Amazon has published. Quote the requirem
 - `pnpm check` must pass, and `pnpm test:e2e` for anything that touches the page.
 - Write the way the code already reads: plain names, comments that say why, user-facing text in plain words.
 - Update the README or docs when behavior changes, and add a line to CHANGELOG.md.
+- After adding, removing or upgrading a dependency that ends up in `dist`, run `pnpm notices` to rewrite THIRD-PARTY-NOTICES.md.
 
 ## Reporting a bug
 
