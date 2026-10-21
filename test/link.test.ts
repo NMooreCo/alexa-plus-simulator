@@ -217,12 +217,35 @@ describe("link's sign-in", () => {
     expect(printed).toContain("keep ALEXA_SIM_CLIENT_SECRET set");
   });
 
-  it("refuses a sign-in that comes back with another state, saving nothing", async () => {
+  it("refuses a sign-in that comes back with another state, and keeps waiting for its own, saving nothing", async () => {
     const auth = await withClient({ consent: "wrong-state" });
-    const { linked: run, file } = await linkTo(auth, { clientId: "my-client", clientSecret: "s3cret:with/odd chars" });
-    await expect(run).rejects.toThrow("came back with a state that isn't this sign-in's");
+    const { linked: run, file } = await linkTo(auth, { clientId: "my-client", clientSecret: "s3cret:with/odd chars", timeoutMs: 300 });
+    await expect(run).rejects.toThrow("No sign-in came back within 300 ms, so nothing was saved.");
     expect(auth.requests("/token")).toEqual([]);
     await expect(stat(file)).rejects.toThrow();
+  });
+
+  it("answers a stray /callback with another state with an error page, and still signs in when the real one comes back", async () => {
+    const auth = await withClient();
+    const strays: { status: number; page: string }[] = [];
+    const { tokens } = await linked(auth, {
+      clientId: "my-client",
+      clientSecret: "s3cret:with/odd chars",
+      open: async (url) => {
+        // Before the browser comes back: an old tab's return, or a request that didn't start here.
+        const callback = new URL(url).searchParams.get("redirect_uri")!;
+        for (const query of ["?state=from-an-earlier-attempt&code=old-code", "?state=forged&error=access_denied", "?code=no-state"]) {
+          const stray = await fetch(`${callback}${query}`);
+          strays.push({ status: stray.status, page: await stray.text() });
+        }
+        await auth.browse(url);
+      },
+    });
+    expect(strays.map((s) => s.status)).toEqual([400, 400, 400]);
+    expect(strays[0]!.page).toContain("link is still waiting");
+    expect(auth.accessTokens.has(tokens.accessToken)).toBe(true);
+    // Only the real return's code was exchanged.
+    expect(auth.requests("/token").map((seen) => new URLSearchParams(seen.body).get("code"))).toEqual([expect.stringMatching(/^code-\d+$/)]);
   });
 
   it("says so when the person doesn't consent, saving nothing", async () => {

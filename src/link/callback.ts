@@ -5,8 +5,10 @@ import { LinkError } from "./oauth.ts";
 
 /**
  * Where the browser comes back after sign-in: a one-shot server on
- * 127.0.0.1 that takes the first /callback, checks its state against this
- * sign-in's, and hands over the code (or what went wrong), then closes.
+ * 127.0.0.1 that waits for the /callback carrying this sign-in's state and
+ * hands over its code (or what went wrong), then closes. A /callback with
+ * any other state (an old tab, or a request that didn't start here) gets an
+ * error page and changes nothing, so it can't end the wait for the real one.
  */
 
 export interface Callback {
@@ -41,13 +43,8 @@ export function duration(ms: number): string {
   return `${ms} ms`;
 }
 
-function judgeReturn(params: URLSearchParams, state: string): Outcome {
-  // State first: until it matches, nothing else on the request can be trusted to be this sign-in's.
-  if (params.get("state") !== state) {
-    return {
-      problem: "The sign-in came back with a state that isn't this sign-in's (from an earlier attempt, or a request that didn't start here), so its code wasn't used. Run link again.",
-    };
-  }
+/** What came back with this sign-in's own state: the code, or what went wrong. */
+function judgeReturn(params: URLSearchParams): Outcome {
   const error = params.get("error");
   if (error) {
     const description = params.get("error_description");
@@ -72,8 +69,18 @@ export async function startCallback(port: number, state: string): Promise<Callba
       page(response, 410, "This sign-in is already over", "Go back to the terminal to see how it went.");
       return;
     }
+    // State first: until it matches, nothing else on the request can be trusted to be this sign-in's.
+    if (url.searchParams.get("state") !== state) {
+      page(
+        response,
+        400,
+        "This isn't the sign-in link is waiting for",
+        "It came back with a state that isn't this sign-in's (from an earlier attempt, or a request that didn't start here), so its code wasn't used. link is still waiting: finish signing in from the address it printed.",
+      );
+      return;
+    }
     answered = true;
-    const result = judgeReturn(url.searchParams, state);
+    const result = judgeReturn(url.searchParams);
     if ("code" in result) page(response, 200, "Signed in", "You can close this tab and go back to the terminal.");
     else page(response, 400, "Sign-in didn't finish", result.problem);
     // Settled once the page is on its way, so closing the server can't cut it off.
