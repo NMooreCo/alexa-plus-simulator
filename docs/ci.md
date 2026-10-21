@@ -25,12 +25,15 @@ name: Alexa+ readiness
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   readiness:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: npm ci
@@ -43,7 +46,7 @@ jobs:
           npx alexa-plus-simulator check http://127.0.0.1:8787/mcp
           --visual --screenshots readiness-screenshots
           --out readiness-report.json --html readiness.html
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: alexa-readiness
