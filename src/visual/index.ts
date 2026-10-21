@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Browser, ConsoleMessage, Page } from "playwright-core";
-import { type ProxyOptions, startProxy } from "../proxy/index.ts";
+import { type ProxyOptions, type RunningProxy, startProxy } from "../proxy/index.ts";
 import { DEVICES, type RuleResult, VERSION } from "../shared/contract.ts";
 
 /**
@@ -213,25 +213,31 @@ interface ScreenGlobals {
   };
 }
 
-/** Shows each screen on each device and judges them. */
+/**
+ * Shows each screen on each device and judges them. Whatever it started (the
+ * browser, the proxy) is closed however it ends, since a proxy left listening
+ * would keep the CLI from ever exiting.
+ */
 export async function checkScreens(o: ScreenCheckOptions): Promise<ScreenCheck> {
   const devices = (o.devices ?? DEFAULT_DEVICES).map((id) => DEVICES.find((d) => d.id === id)).filter((d) => d && d.surface !== "none");
-  const proxy = await startProxy({
-    upstream: o.serverUrl,
-    port: 0,
-    clientPort: 0,
-    ...(o.token ? { token: o.token } : {}),
-    ...(o.headers ? { headers: o.headers } : {}),
-    uiDir: o.uiDir,
-    routes: { "/api/info": async () => Response.json({ version: VERSION, model: null, phrases: [], extensions: [] }) },
-  });
+  // The browser first: without one there's nothing to do, and nothing else has started yet.
   const { browser, name } = await launchBrowser(o.browser);
+  let proxy: RunningProxy | undefined;
   const shots: ScreenShot[] = [];
   let calls: ScreenCall[] = [];
   let declared = 0;
   let skipped: string | undefined;
   let unreachable: string | undefined;
   try {
+    proxy = await startProxy({
+      upstream: o.serverUrl,
+      port: 0,
+      clientPort: 0,
+      ...(o.token ? { token: o.token } : {}),
+      ...(o.headers ? { headers: o.headers } : {}),
+      uiDir: o.uiDir,
+      routes: { "/api/info": async () => Response.json({ version: VERSION, model: null, phrases: [], extensions: [] }) },
+    });
     if (o.outDir) await mkdir(o.outDir, { recursive: true });
     for (const device of devices) {
       const page = await browser.newPage({ viewport: { width: 2600, height: 1500 } });
@@ -309,7 +315,7 @@ export async function checkScreens(o: ScreenCheckOptions): Promise<ScreenCheck> 
     }
   } finally {
     await browser.close();
-    await proxy.close();
+    await proxy?.close();
   }
   if (unreachable) {
     const note = `The page couldn't connect, so no screen was shown (see DL-01): ${unreachable}`;

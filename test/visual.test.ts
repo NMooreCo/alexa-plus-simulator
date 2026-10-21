@@ -104,6 +104,30 @@ describe("the HTML report", () => {
   });
 });
 
+/** How many servers this process has listening: one left behind would keep the CLI from exiting. */
+const listening = () => process.getActiveResourcesInfo().filter((kind) => kind === "TCPServerWrap").length;
+
+describe("without a browser", () => {
+  let example: { url: string; close: () => Promise<void> };
+  beforeAll(async () => {
+    example = (await startExample({ port: 0 })) as typeof example;
+  });
+  afterAll(() => example?.close());
+
+  it("says so plainly and leaves nothing running, so the CLI exits", async () => {
+    const before = listening();
+    const uiDir = fileURLToPath(new URL("../dist/ui", import.meta.url));
+    await expect(checkScreens({ serverUrl: example.url, uiDir, browser: "no-such-browser" })).rejects.toThrow("No browser to render the screens in.");
+    expect(listening()).toBe(before);
+
+    const err: string[] = [];
+    const code = await main(["check", example.url, "--visual", "--browser", "no-such-browser"], { out: () => {}, err: (l) => err.push(l), env: {} });
+    expect(code).toBe(1);
+    expect(err[0]).toMatch(/^No browser to render the screens in\. Install Chrome or Edge/);
+    expect(listening()).toBe(before);
+  });
+});
+
 /** A server whose screen does everything wrong: too wide, loads an image it didn't declare, and throws. */
 async function startBadScreen(): Promise<{ url: string; close: () => Promise<void> }> {
   const uri = "ui://bad/screen";
