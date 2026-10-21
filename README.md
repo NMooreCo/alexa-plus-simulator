@@ -97,7 +97,7 @@ A model stands in for Alexa+'s own: it reads the conversation, decides what to s
 
 ## The readiness rules
 
-Each rule quotes the requirement it checks, with a link, in the report itself. On its own, the check only calls tools marked `readOnlyHint: true` that need no arguments, plus a made-up tool name to see how errors come back; it makes any other call only when you list it with `--calls`.
+Each rule quotes the requirement it checks, with a link, in the report itself. On its own, the check only calls tools marked `readOnlyHint: true` that need no arguments, plus a made-up tool name to see how errors come back; it makes any other call only when you list it with `--calls`. With `--visual`, each screen runs its own scripts as it would on an Echo, so a screen that calls tools while it loads makes those calls too.
 
 | Rule | Checks |
 |---|---|
