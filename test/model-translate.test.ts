@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { type ConverseRequest, converseRequest, fromConverse } from "../src/model/bedrock.ts";
+import { fromGemini, type GeminiRequest, geminiRequest } from "../src/model/gemini.ts";
 import { type ChatRequest, chatRequest, fromChat } from "../src/model/openai.ts";
 import { type ModelReply, TurnError } from "../src/model/provider.ts";
 import { readHistory, spoken, toolInput } from "../src/model/translate.ts";
@@ -11,7 +12,8 @@ import { readHistory, spoken, toolInput } from "../src/model/translate.ts";
  * every tool call keeps its result beside it and the page gets blocks it reads.
  */
 
-const TOOLS = ["show_today", "add_item", "get_weather", "set_timer"].map((name) => ({ name, description: `The ${name} tool`, input_schema: { type: "object" } }));
+// One name starts with a digit, which Gemini's function names can't.
+const TOOLS = ["show_today", "add_item", "get_weather", "set_timer", "3d_print"].map((name) => ({ name, description: `The ${name} tool`, input_schema: { type: "object" } }));
 
 describe("reading the page's conversation", () => {
   it("joins back-to-back messages from one side and leaves out blank text, Claude's own blocks and empty messages", () => {
@@ -108,14 +110,19 @@ const exchange = fc.record({
   reversed: fc.boolean(),
   // A model can answer with nothing at all, and the page keeps that empty reply too.
   answer: fc.option(words, { nil: undefined }),
+  // Gemini puts a thought signature on the first call of a reply, and may on its last text.
+  signed: fc.boolean(),
+  answerSigned: fc.boolean(),
 });
 
 type Exchange = typeof exchange extends fc.Arbitrary<infer T> ? T : never;
 interface Pair {
   id: string;
+  name: string;
   input: Record<string, unknown>;
   result: string;
   isError: boolean;
+  signature?: string;
 }
 
 /** The page's messages for some exchanges, and each group of calls with its results, in the calls' order. */
@@ -125,14 +132,24 @@ function conversation(exchanges: Exchange[], style: string): { messages: unknown
   let n = 0;
   for (const x of exchanges) {
     messages.push({ role: "user", content: x.said.map((text) => ({ type: "text", text })) });
-    const pairs = x.calls.map((c) => ({ id: `${style}${++n}`, input: c.input, result: c.result, isError: c.isError }));
+    const pairs: Pair[] = x.calls.map((c, i) => ({
+      id: `${style}${++n}`,
+      name: c.name,
+      input: c.input,
+      result: c.result,
+      isError: c.isError,
+      ...(x.signed && i === 0 ? { signature: `c2lnbmF0dXJl${n}` } : {}),
+    }));
     const start = [...(x.thinking ? [{ type: "thinking", thinking: "Hm.", signature: "c2ln" }] : []), ...(x.preamble ? [{ type: "text", text: x.preamble }] : [])];
-    const answer = x.answer ? [{ type: "text", text: x.answer }] : [];
+    const answer = x.answer ? [{ type: "text", text: x.answer, ...(x.answerSigned ? { thought_signature: "YW5zd2Vy" } : {}) }] : [];
     if (!pairs.length) {
       messages.push({ role: "assistant", content: [...start, ...answer] });
       continue;
     }
-    messages.push({ role: "assistant", content: [...start, ...pairs.map((p, i) => ({ type: "tool_use", id: p.id, name: x.calls[i]!.name, input: p.input }))] });
+    messages.push({
+      role: "assistant",
+      content: [...start, ...pairs.map((p) => ({ type: "tool_use", id: p.id, name: p.name, input: p.input, ...(p.signature ? { thought_signature: p.signature } : {}) }))],
+    });
     const results = pairs.map((p) => ({ type: "tool_result", tool_use_id: p.id, content: p.result, ...(p.isError ? { is_error: true } : {}) }));
     messages.push({ role: "user", content: x.reversed ? results.reverse() : results });
     messages.push({ role: "assistant", content: answer });
@@ -182,6 +199,32 @@ function chatPairs(request: ChatRequest): { ids: string[]; inputs: unknown[]; re
   return groups;
 }
 
+type GeminiCall = { name: string; id?: string; signature?: string };
+type GeminiResponse = { name: string; id?: string; response: unknown };
+
+/**
+ * A generateContent request's calls, grouped by content, each group checked to
+ * be answered at the start of the next content by name and id, in order (never
+ * interleaved), with roles taking turns from the user and every function name
+ * one Gemini takes.
+ */
+function geminiPairs(request: GeminiRequest): { calls: GeminiCall[]; results: GeminiResponse[] }[] {
+  const groups: { calls: GeminiCall[]; results: GeminiResponse[] }[] = [];
+  request.contents.forEach((c, i) => {
+    expect(c.role).toBe(i % 2 === 0 ? "user" : "model");
+    const calls = c.parts.flatMap((p): GeminiCall[] => ("functionCall" in p ? [{ ...p.functionCall, ...(p.thoughtSignature ? { signature: p.thoughtSignature } : {}) }] : []));
+    const results = (request.contents[i + 1]?.parts ?? []).slice(0, calls.length).flatMap((p) => ("functionResponse" in p ? [p.functionResponse] : []));
+    for (const call of calls) expect(call.name).toMatch(/^[A-Za-z_][\w.:-]*$/);
+    if (calls.length) {
+      expect(results.map((r) => [r.name, r.id])).toEqual(calls.map((call) => [call.name, call.id]));
+      groups.push({ calls, results });
+    }
+  });
+  const answered = groups.reduce((sum, g) => sum + g.calls.length, 0);
+  expect(request.contents.flatMap((c) => c.parts.filter((p) => "functionResponse" in p))).toHaveLength(answered);
+  return groups;
+}
+
 /** JSON's view of a value (so -0 and 0 count as the same, as they do once sent). */
 const asJson = (v: unknown) => JSON.parse(JSON.stringify(v)) as unknown;
 
@@ -214,6 +257,25 @@ describe("any conversation the page could keep", () => {
         expect(pairs.map((g) => g.ids)).toEqual(groups.map((g) => g.map((p) => p.id)));
         expect(pairs.map((g) => g.inputs)).toEqual(groups.map((g) => g.map((p) => asJson(p.input))));
         expect(pairs.map((g) => g.results.map((r) => r.content))).toEqual(groups.map((g) => g.map((p) => (p.isError ? `Error: ${p.result}` : p.result))));
+      }),
+    );
+  });
+
+  it("goes to Gemini with every call answered by name and id right after it, each thought signature back on its own part", () => {
+    fc.assert(
+      fc.property(fc.array(exchange, { minLength: 1, maxLength: 4 }), idStyle, (exchanges, style) => {
+        const { messages, groups } = conversation(exchanges, style);
+        const request = geminiRequest({ messages, tools: TOOLS, context: {} }, "gemini-3.8-flash");
+        const pairs = geminiPairs(request);
+        expect(pairs.map((g) => g.calls.map((c) => c.id))).toEqual(groups.map((g) => g.map((p) => p.id)));
+        // A name Gemini can't take gets an underscore in front, the same on the call and its response.
+        expect(pairs.map((g) => g.calls.map((c) => c.name))).toEqual(groups.map((g) => g.map((p) => (/^\d/.test(p.name) ? `_${p.name}` : p.name))));
+        expect(pairs.map((g) => g.calls.map((c) => c.signature))).toEqual(groups.map((g) => g.map((p) => p.signature)));
+        expect(pairs.map((g) => g.results.map((r) => r.response))).toEqual(groups.map((g) => g.map((p) => (p.isError ? { error: p.result } : { output: p.result }))));
+        // An answer's signature goes back on its text, and nowhere else does one appear.
+        const signedTexts = request.contents.flatMap((c) => c.parts.filter((p) => "text" in p && p.thoughtSignature));
+        expect(signedTexts.every((p) => "text" in p && p.thoughtSignature === "YW5zd2Vy")).toBe(true);
+        expect(signedTexts).toHaveLength(exchanges.filter((x) => x.answer && x.answerSigned).length);
       }),
     );
   });
@@ -277,6 +339,31 @@ const chatAnswer = fc.record({
   usage: fc.option(fc.record({ prompt_tokens: fc.nat(), completion_tokens: fc.nat(), prompt_tokens_details: fc.record({ cached_tokens: fc.nat() }) }), { nil: undefined }),
 });
 
+/** The page's tool names as Gemini calls them: one that starts with a digit gets an underscore. */
+const geminiName = fc.constantFrom(...TOOLS.map((t) => (/^\d/.test(t.name) ? `_${t.name}` : t.name)));
+const geminiPart = fc.oneof(
+  words.map((text) => ({ text })),
+  words.map((text) => ({ text, thoughtSignature: "dGV4dFNpZw" })),
+  fc.record({ name: geminiName, args: fc.option(toolArgs, { nil: undefined }), withId: fc.boolean(), signed: fc.boolean() }),
+  // A thought summary, marked so it can't be mistaken for anything `words` makes.
+  fc.constant({ text: "§ thought §", thought: true }),
+);
+const geminiAnswer = fc.record({
+  // Each call gets its own id when it has one, and a signature when it's signed.
+  parts: fc.array(geminiPart, { maxLength: 5 }).map((parts) =>
+    parts.map((p, i) =>
+      "withId" in p
+        ? { functionCall: { name: p.name, ...(p.args ? { args: p.args } : {}), ...(p.withId ? { id: `fc${i}` } : {}) }, ...(p.signed ? { thoughtSignature: `Y2FsbFNpZw${i}` } : {}) }
+        : p,
+    ),
+  ),
+  finishReason: fc.constantFrom("STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "OTHER", "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL", "MISSING_THOUGHT_SIGNATURE"),
+  usage: fc.record(
+    { promptTokenCount: fc.nat(), candidatesTokenCount: fc.nat(), totalTokenCount: fc.nat(), cachedContentTokenCount: fc.nat(), thoughtsTokenCount: fc.nat() },
+    { requiredKeys: ["promptTokenCount", "totalTokenCount"] },
+  ),
+});
+
 describe("any reply a provider could send", () => {
   it("from Converse, comes back as blocks the page reads, and goes back paired; or as an error the page explains", () => {
     fc.assert(
@@ -311,6 +398,32 @@ describe("any reply a provider could send", () => {
         });
         if (a.refusal) expect(reply.stop_reason).toBe("refusal");
         chatPairs(chatRequest({ messages: nextTurn(reply), tools: TOOLS, context: {} }, "gpt-6-sol"));
+      }),
+    );
+  });
+
+  it("from Gemini, comes back as blocks the page reads, named as the page knows them with their signatures, and goes back as it came; or as an error the page explains", () => {
+    const names = TOOLS.map((t) => t.name);
+    fc.assert(
+      fc.property(geminiAnswer, (a) => {
+        const body = { candidates: [{ content: { role: "model", parts: a.parts }, finishReason: a.finishReason, index: 0 }], usageMetadata: a.usage, modelVersion: "gemini-3.8-flash", responseId: "cmVzcG9uc2U" };
+        if (["MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL", "MISSING_THOUGHT_SIGNATURE"].includes(a.finishReason)) {
+          expect(() => fromGemini(body, "gemini-3.8-flash", names)).toThrow(TurnError);
+          return;
+        }
+        const reply = fromGemini(body, "gemini-3.8-flash", names);
+        expectPageReply(reply);
+        const calls = a.parts.flatMap((p) => ("functionCall" in p ? [p] : []));
+        const uses = reply.content.filter((b) => b.type === "tool_use");
+        expect(uses.map((u) => u.name)).toEqual(calls.map((c) => c.functionCall.name.replace(/^_(?=\d)/, "")));
+        expect(uses.map((u) => u.thought_signature)).toEqual(calls.map((c) => c.thoughtSignature));
+        // Thought summaries aren't said.
+        expect(JSON.stringify(reply.content)).not.toContain("§");
+        const request = geminiRequest({ messages: nextTurn(reply), tools: TOOLS, context: {} }, "gemini-3.8-flash");
+        geminiPairs(request);
+        // The calls go back as Gemini sent them: its names, its ids (none where it gave none) and its signatures, on the same parts.
+        const sentBack = request.contents.flatMap((c) => c.parts.flatMap((p) => ("functionCall" in p ? [{ name: p.functionCall.name, id: p.functionCall.id, signature: p.thoughtSignature }] : [])));
+        expect(sentBack).toEqual(calls.map((c) => ({ name: c.functionCall.name, id: c.functionCall.id, signature: c.thoughtSignature })));
       }),
     );
   });

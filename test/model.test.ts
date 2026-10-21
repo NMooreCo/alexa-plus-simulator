@@ -24,13 +24,25 @@ function anthropic(answer: () => Response = () => Response.json(reply)) {
 const apiError = (status: number, type: string) => () => Response.json({ type: "error", error: { type, message: type } }, { status, headers: { "retry-after": "0" } });
 
 describe("the model route", () => {
-  it("says plainly that credentials are needed, naming every provider's, and that the Tools panel works without them", async () => {
+  it("says plainly that credentials are needed, naming every provider's (the page adds that the Tools tab works without them)", async () => {
     const res = await modelRoute({})(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }));
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("no_key");
-    for (const name of ["ANTHROPIC_API_KEY", "AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"]) expect(body.error.message).toContain(name);
-    expect(body.error.message).toContain("Tools panel");
+    for (const name of [
+      "ANTHROPIC_API_KEY",
+      "ANTHROPIC_FOUNDRY_API_KEY",
+      "ANTHROPIC_FOUNDRY_RESOURCE",
+      "AWS_BEARER_TOKEN_BEDROCK",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "GEMINI_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENAI_BASE_URL",
+    ]) {
+      expect(body.error.message).toContain(name);
+    }
+    expect(body.error.message).not.toContain("Tools");
   });
 
   it("asks Claude Opus 5.5 at low effort, with the refusal fallback, the voice rules cached and the turn's details after them", async () => {
@@ -74,7 +86,13 @@ describe("the model route", () => {
 
   it("refuses a malformed or oversized turn before it costs anything", async () => {
     const fetch = vi.fn();
-    for (const options of [{ anthropic: { apiKey: "key" } }, { bedrock: { bearerToken: "key" } }, { openai: { apiKey: "key" } }]) {
+    for (const options of [
+      { anthropic: { apiKey: "key" } },
+      { foundry: { apiKey: "key", resource: "example-resource" } },
+      { bedrock: { bearerToken: "key" } },
+      { gemini: { apiKey: "key" } },
+      { openai: { apiKey: "key" } },
+    ]) {
       const route = modelRoute({ ...options, fetch });
       expect((await route(turn({ messages: [], tools: [] }))).status).toBe(400);
       expect((await route(turn({ messages: [{ role: "user", content: "hi" }], tools: [{ name: "bad name!", input_schema: {} }] }))).status).toBe(400);
@@ -114,38 +132,54 @@ describe("choosing the model", () => {
     bedrockIam: { AWS_ACCESS_KEY_ID: "AKIDEXAMPLE", AWS_SECRET_ACCESS_KEY: "secret" },
     openai: { OPENAI_API_KEY: "sk-openai" },
     local: { OPENAI_BASE_URL: "http://localhost:11434/v1" },
+    foundry: { ANTHROPIC_FOUNDRY_API_KEY: "foundry-key", ANTHROPIC_FOUNDRY_RESOURCE: "example-resource" },
+    gemini: { GEMINI_API_KEY: "gemini-key" },
   };
   const choose = (vars: Record<string, string>, flags: Parameters<typeof modelOptionsFromEnv>[1] = {}) => chooseProvider(modelOptionsFromEnv(vars, flags));
 
-  it("takes the first provider with credentials: Anthropic, then Bedrock, then OpenAI", () => {
+  it("takes the first provider with credentials: Anthropic, Microsoft Foundry, Bedrock, Gemini, then OpenAI", () => {
+    const all = { ...env.openai, ...env.gemini, ...env.bedrockKey, ...env.foundry, ...env.anthropic };
     expect(choose({})).toBeNull();
-    expect(choose({ ...env.openai, ...env.bedrockKey, ...env.anthropic })).toBe("anthropic");
-    expect(choose({ ...env.openai, ...env.bedrockKey })).toBe("bedrock");
-    expect(choose({ ...env.openai, ...env.bedrockIam })).toBe("bedrock");
+    expect(choose(all)).toBe("anthropic");
+    expect(choose({ ...all, ANTHROPIC_API_KEY: "" })).toBe("foundry");
+    expect(choose({ ...env.openai, ...env.gemini, ...env.bedrockKey })).toBe("bedrock");
+    expect(choose({ ...env.openai, ...env.gemini, ...env.bedrockIam })).toBe("bedrock");
+    expect(choose({ ...env.openai, ...env.gemini })).toBe("gemini");
+    expect(choose({ ...env.openai, GOOGLE_API_KEY: "google-key" })).toBe("gemini");
     expect(choose(env.openai)).toBe("openai");
     // A local server needs no key, only its address.
     expect(choose(env.local)).toBe("openai");
-    // Half of an IAM key pair isn't credentials, and an empty variable is no variable.
-    expect(choose({ AWS_ACCESS_KEY_ID: "AKIDEXAMPLE", ANTHROPIC_API_KEY: "" })).toBeNull();
+    // Half of an IAM key pair isn't credentials, nor is a Foundry key without its resource, and an empty variable is no variable.
+    expect(choose({ AWS_ACCESS_KEY_ID: "AKIDEXAMPLE", ANTHROPIC_FOUNDRY_API_KEY: "foundry-key", ANTHROPIC_API_KEY: "" })).toBeNull();
+    // A Foundry resource answers to an Entra ID token as well as its key.
+    expect(choose({ ANTHROPIC_FOUNDRY_BASE_URL: "https://example-resource.services.ai.azure.com/anthropic/", AZURE_OPENAI_AUTH_TOKEN: "entra-token" })).toBe("foundry");
   });
 
   it("uses the provider it's told to, and only with its own credentials", () => {
     expect(choose({ ...env.anthropic, ...env.openai }, { provider: "openai" })).toBe("openai");
+    expect(choose({ ...env.anthropic, ...env.gemini }, { provider: "gemini" })).toBe("gemini");
     expect(choose(env.anthropic, { provider: "bedrock" })).toBeNull();
   });
 
-  it("names what a chosen provider still needs, and keeps Anthropic's own message", async () => {
+  it("takes GOOGLE_API_KEY over GEMINI_API_KEY when both are set, as Google's libraries do", () => {
+    expect(modelOptionsFromEnv({ GEMINI_API_KEY: "gemini-key", GOOGLE_API_KEY: "google-key" }).gemini?.apiKey).toBe("google-key");
+    expect(modelOptionsFromEnv({ GEMINI_API_KEY: "gemini-key" }).gemini?.apiKey).toBe("gemini-key");
+  });
+
+  it("names what a chosen provider still needs, and only that", async () => {
+    const said = async (setup: ReturnType<typeof setUpModel>) => ((await (await setup.route(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }))).json()) as { error: { message: string } }).error.message;
     const bedrock = setUpModel({ provider: "bedrock" });
     expect(bedrock).toMatchObject({ provider: null, model: null, label: null });
     expect(bedrock.summary).toBe("none: set AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) for Bedrock to talk (the Tools tab works without one)");
-    const said = ((await (await bedrock.route(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }))).json()) as { error: { message: string } }).error.message;
-    expect(said).toContain("AWS_BEARER_TOKEN_BEDROCK");
-    expect(said).not.toContain("ANTHROPIC_API_KEY");
-    const claude = setUpModel({ provider: "anthropic" });
-    expect(((await (await claude.route(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }))).json()) as { error: { message: string } }).error.message).toBe(
-      "Set ANTHROPIC_API_KEY to talk to the simulator. You can still call tools from the Tools panel.",
+    expect(await said(bedrock)).toBe("Set AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) for Bedrock to talk to the simulator.");
+    expect(await said(setUpModel({ provider: "anthropic" }))).toBe("Set ANTHROPIC_API_KEY for Anthropic to talk to the simulator.");
+    expect(await said(setUpModel({ provider: "foundry" }))).toBe(
+      "Set ANTHROPIC_FOUNDRY_API_KEY (or AZURE_OPENAI_AUTH_TOKEN) and ANTHROPIC_FOUNDRY_RESOURCE (or ANTHROPIC_FOUNDRY_BASE_URL) for Microsoft Foundry to talk to the simulator.",
     );
-    expect(setUpModel({}).summary).toContain("ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) or OPENAI_API_KEY");
+    expect(await said(setUpModel({ provider: "gemini" }))).toBe("Set GEMINI_API_KEY (or GOOGLE_API_KEY) for Gemini to talk to the simulator.");
+    // A Foundry key without its resource isn't enough.
+    expect(setUpModel(modelOptionsFromEnv({ ANTHROPIC_FOUNDRY_API_KEY: "key" }, { provider: "foundry" })).provider).toBeNull();
+    expect(setUpModel({}).summary).toMatch(/^none: set ANTHROPIC_API_KEY; ANTHROPIC_FOUNDRY_API_KEY and ANTHROPIC_FOUNDRY_RESOURCE/);
   });
 
   it("calls each model something readable, and says where it runs", () => {
@@ -174,6 +208,19 @@ describe("choosing the model", () => {
     });
     // A blank --model is no --model.
     expect(setUp(env.openai, { model: "  " }).model).toBe("gpt-6-sol");
+    expect(setUp(env.foundry)).toMatchObject({
+      provider: "foundry",
+      model: "claude-opus-5-5",
+      label: "Claude on Microsoft Foundry (claude-opus-5-5)",
+      summary: "Claude on Microsoft Foundry (claude-opus-5-5) at example-resource.services.ai.azure.com, with an API key",
+    });
+    expect(setUp(env.foundry, { model: "DeepSeek-V3.2" }).label).toBe("DeepSeek on Microsoft Foundry (DeepSeek-V3.2)");
+    expect(setUp(env.foundry, { model: "gpt-5.6-sol" }).label).toBe("OpenAI on Microsoft Foundry (gpt-5.6-sol)");
+    // A deployment whose name doesn't say what it is speaks the API it's told to.
+    expect(setUp(env.foundry, { model: "voice-prod", foundryApi: "anthropic" }).label).toBe("Claude on Microsoft Foundry (voice-prod)");
+    expect(setUp(env.foundry, { model: "voice-prod" }).label).toBe("A model on Microsoft Foundry (voice-prod)");
+    expect(setUp(env.gemini)).toMatchObject({ provider: "gemini", model: "gemini-3.8-flash", label: "Gemini (gemini-3.8-flash)", summary: "Gemini (gemini-3.8-flash)" });
+    expect(setUp({ ...env.gemini, GOOGLE_GEMINI_BASE_URL: "https://gateway.example/google/" }).summary).toBe("Gemini (gemini-3.8-flash), through https://gateway.example");
   });
 
   it("reads Bedrock's region from --region, then AWS_REGION, then AWS_DEFAULT_REGION", () => {
@@ -188,6 +235,10 @@ describe("choosing the model", () => {
     expect(() => setUpModel(modelOptionsFromEnv({ ...env.bedrockKey, AWS_REGION: "evil.example/x?" }))).toThrow(/AWS Region/);
     expect(() => setUpModel(modelOptionsFromEnv({ OPENAI_BASE_URL: "localhost:11434" }))).toThrow(/OPENAI_BASE_URL/);
     expect(() => setUpModel(modelOptionsFromEnv({ OPENAI_API_KEY: "sk", OPENAI_BASE_URL: "not a url" }))).toThrow(/OPENAI_BASE_URL/);
+    // A Foundry resource's name goes into a host name, so it's only letters, digits and dashes; and it's the name or the URL, as Anthropic's client takes them.
+    expect(() => setUpModel(modelOptionsFromEnv({ ...env.foundry, ANTHROPIC_FOUNDRY_RESOURCE: "evil.example/x" }))).toThrow(/Foundry resource name/);
+    expect(() => setUpModel(modelOptionsFromEnv({ ...env.foundry, ANTHROPIC_FOUNDRY_BASE_URL: "https://example-resource.services.ai.azure.com/anthropic/" }))).toThrow(/not both/);
+    expect(() => setUpModel(modelOptionsFromEnv({ ...env.gemini, GOOGLE_GEMINI_BASE_URL: "nope" }))).toThrow(/GOOGLE_GEMINI_BASE_URL/);
     // A bad setting for a provider that isn't answering doesn't matter.
     expect(setUpModel(modelOptionsFromEnv({ ...env.anthropic, AWS_REGION: "nowhere", OPENAI_BASE_URL: "nope" })).provider).toBe("anthropic");
   });

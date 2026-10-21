@@ -9,9 +9,10 @@ import { type ModelReply, type ReplyBlock, TurnError } from "./provider.ts";
  * the way back, it puts a reply into the Messages API's shape.
  */
 
+/** A text or a call can carry the thought signature Gemini gave it, for Gemini alone to read. */
 export type Part =
-  | { type: "text"; text: string }
-  | { type: "call"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "text"; text: string; signature?: string }
+  | { type: "call"; id: string; name: string; input: Record<string, unknown>; signature?: string }
   | { type: "result"; id: string; text: string; isError: boolean };
 
 export interface Message {
@@ -60,12 +61,13 @@ function readMessage(raw: unknown, index: number): Message {
   const parts: Part[] = [];
   for (const block of content) {
     if (!isRecord(block)) throw bad(`${where} has a block that isn't an object.`);
+    const signed = nonEmpty(block.thought_signature) ? { signature: block.thought_signature } : {};
     if (block.type === "text") {
       if (typeof block.text !== "string") throw bad(`${where} has a text block with no text.`);
-      if (block.text.trim()) parts.push({ type: "text", text: block.text });
+      if (block.text.trim()) parts.push({ type: "text", text: block.text, ...signed });
     } else if (block.type === "tool_use") {
       if (role !== "assistant" || !nonEmpty(block.id) || !nonEmpty(block.name)) throw bad(`${where} has a tool_use block that isn't the assistant's or has no id and name.`);
-      parts.push({ type: "call", id: block.id, name: block.name, input: isRecord(block.input) ? block.input : {} });
+      parts.push({ type: "call", id: block.id, name: block.name, input: isRecord(block.input) ? block.input : {}, ...signed });
     } else if (block.type === "tool_result") {
       if (role !== "user" || !nonEmpty(block.tool_use_id)) throw bad(`${where} has a tool_result block that isn't the user's or has no tool_use_id.`);
       parts.push({ type: "result", id: block.tool_use_id, text: resultText(block.content), isError: block.is_error === true });

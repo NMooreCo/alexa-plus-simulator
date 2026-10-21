@@ -176,21 +176,48 @@ export function chatError({ status, body, text }: Answer, who = "OpenAI"): TurnE
   return new TurnError(502, "model_error", explained(`${name} answered ${status}`, said));
 }
 
+/** One Chat Completions endpoint, and how the simulator names it. */
+export interface ChatRoute {
+  endpoint: URL;
+  /** Sent as a bearer token, as OpenAI and Microsoft Foundry both take a key (and Foundry an Entra ID token); a local server may need none. */
+  apiKey?: string;
+  model: string;
+  /** Who answers, in an error ("OpenAI", "the server at localhost:11434"). */
+  who: string;
+  label: string;
+  summary: string;
+  fetch?: FetchLike;
+  retryDelayMs?: number;
+}
+
+/** Turns through a Chat Completions endpoint: OpenAI's, another server's, or Microsoft Foundry's. */
+export function chatProvider(route: ChatRoute): Provider {
+  const fetchFn = route.fetch ?? fetch;
+  return {
+    label: route.label,
+    summary: route.summary,
+    async turn(turn, signal) {
+      const body = JSON.stringify(chatRequest(turn, route.model));
+      const headers = { "content-type": "application/json", accept: "application/json", ...(route.apiKey ? { authorization: `Bearer ${route.apiKey}` } : {}) };
+      const answer = await send(() => fetchFn(route.endpoint, { method: "POST", headers, body, signal }), route.who, signal, route.retryDelayMs);
+      if (answer.status < 200 || answer.status > 299) throw chatError(answer, route.who);
+      return fromChat(answer.body, route.model, route.who);
+    },
+  };
+}
+
 export function openaiProvider(options: OpenAIOptions & { model: string; fetch?: FetchLike; retryDelayMs?: number }): Provider {
   const endpoint = chatEndpoint(options.baseURL);
   const own = endpoint.origin === new URL(OPENAI_BASE_URL).origin;
-  const who = own ? "OpenAI" : `the server at ${endpoint.host}`;
-  const fetchFn = options.fetch ?? fetch;
   const label = own ? `OpenAI (${options.model})` : `OpenAI-compatible server at ${endpoint.host} (${options.model})`;
-  return {
+  return chatProvider({
+    endpoint,
+    apiKey: options.apiKey,
+    model: options.model,
+    who: own ? "OpenAI" : `the server at ${endpoint.host}`,
     label,
     summary: own ? label : `${label}, through ${endpoint.href}`,
-    async turn(turn, signal) {
-      const body = JSON.stringify(chatRequest(turn, options.model));
-      const headers = { "content-type": "application/json", accept: "application/json", ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}) };
-      const answer = await send(() => fetchFn(endpoint, { method: "POST", headers, body, signal }), who, signal, options.retryDelayMs);
-      if (answer.status < 200 || answer.status > 299) throw chatError(answer, who);
-      return fromChat(answer.body, options.model, who);
-    },
-  };
+    fetch: options.fetch,
+    retryDelayMs: options.retryDelayMs,
+  });
 }

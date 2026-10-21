@@ -44,8 +44,9 @@
     "prepublishOnly": "pnpm check"
   },
   "dependencies": {
+    "@anthropic-ai/foundry-sdk": "0.6.0",
     "@anthropic-ai/sdk": "^0.135.0",
-"aws4fetch": "1.0.20",
+    "aws4fetch": "1.0.20",
     "playwright-core": "1.63.0"
   },
   "devDependencies": {
