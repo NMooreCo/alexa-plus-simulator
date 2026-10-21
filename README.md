@@ -8,7 +8,7 @@ An open, unofficial simulator and readiness check for Alexa+ MCP add-ons. Point 
 npx alexa-plus-simulator https://your-server.example.com/mcp
 ```
 
-Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` (or Amazon Bedrock or OpenAI credentials; see [Models](#models)) to talk to it; without any you can still call every tool by hand and run the readiness check.
+Then open http://localhost:6274. Set `ANTHROPIC_API_KEY` (or credentials for Microsoft Foundry, Amazon Bedrock, Gemini or OpenAI; see [Models](#models)) to talk to it; without any you can still call every tool by hand and run the readiness check.
 
 ![The simulator: a to-do list add-on's screen on a simulated Echo Show 8, the spoken answer captioned, and the conversation beside it](docs/images/simulator.png)
 
@@ -59,9 +59,10 @@ alexa-plus-simulator link <mcp-url> [options]  Sign in the way Alexa+ account li
 | `--extension <file.js>` | An extension for the page (repeatable); see [Extending it](#extending-it) |
 | `--server-port <port>` | The proxy's port (default 6277) |
 | `--client-port <port>` | The page's port (default 6274) |
-| `--provider <name>` | Who stands in for Alexa+'s model: `anthropic`, `bedrock` or `openai` (default: the first with credentials, in that order); see [Models](#models) |
-| `--model <id>` | The model standing in for Alexa+ (default `claude-opus-5-5` on Anthropic, `global.amazon.nova-2-lite-v1:0` on Bedrock, `gpt-6-sol` on OpenAI) |
+| `--provider <name>` | Who stands in for Alexa+'s model: `anthropic`, `foundry`, `bedrock`, `gemini` or `openai` (default: the first with credentials, in that order); see [Models](#models) |
+| `--model <id>` | The model standing in for Alexa+, or on Microsoft Foundry the deployment's name (default `claude-opus-5-5` on Anthropic and Foundry, `global.amazon.nova-2-lite-v1:0` on Bedrock, `gemini-3.8-flash` on Gemini, `gpt-6-sol` on OpenAI) |
 | `--region <region>` | Bedrock's AWS Region (default `AWS_REGION`, `AWS_DEFAULT_REGION` or `us-east-1`) |
+| `--foundry-api <api>` | Which API a Foundry deployment speaks, `anthropic` or `openai`, for a name that doesn't say (default: `anthropic` when the name has "claude" in it) |
 | `--no-fallbacks` | Leave Anthropic's refusal fallback off, for a gateway that doesn't pass it through |
 | `--open` | Open the simulator in the browser |
 | `--verbose` | Log every exchange |
@@ -72,23 +73,27 @@ alexa-plus-simulator link <mcp-url> [options]  Sign in the way Alexa+ account li
 | `--browser <name>` | `check --visual`: `chrome`, `msedge` or `chromium` (default: the first one installed) |
 | `--json` | `check`, `validate`: print JSON instead of a summary |
 
-A model's credentials in the environment turn on talking: `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` for a gateway), `AWS_BEARER_TOKEN_BEDROCK` or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for Bedrock, or `OPENAI_API_KEY` and `OPENAI_BASE_URL` for OpenAI or a server that speaks its API. They stay on your machine: the page asks the simulator's own server, which asks the provider.
+A model's credentials in the environment turn on talking: `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` for a gateway); `ANTHROPIC_FOUNDRY_API_KEY` (or `AZURE_OPENAI_AUTH_TOKEN`) with `ANTHROPIC_FOUNDRY_RESOURCE` (or `ANTHROPIC_FOUNDRY_BASE_URL`) for Microsoft Foundry; `AWS_BEARER_TOKEN_BEDROCK`, or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, for Bedrock; `GEMINI_API_KEY` or `GOOGLE_API_KEY` (and `GOOGLE_GEMINI_BASE_URL` for a gateway) for Gemini; or `OPENAI_API_KEY` and `OPENAI_BASE_URL` for OpenAI or a server that speaks its API. They stay on your machine: the page asks the simulator's own server, which asks the provider.
 
 ## Models
 
-A model stands in for Alexa+'s own: it reads the conversation, decides what to say and which of your tools to call, and the page makes the calls. Any of three providers can be that model, each through its own API; the page works the same with all of them.
+A model stands in for Alexa+'s own: it reads the conversation, decides what to say and which of your tools to call, and the page makes the calls. Any of five providers can be that model, each through its own API; the page works the same with all of them.
 
 | `--provider` | Credentials | Default model |
 |---|---|---|
 | `anthropic` | `ANTHROPIC_API_KEY`, and `ANTHROPIC_BASE_URL` for a gateway | `claude-opus-5-5` at low effort, with Anthropic's refusal fallback |
+| `foundry` | `ANTHROPIC_FOUNDRY_API_KEY` (the resource's key) or `AZURE_OPENAI_AUTH_TOKEN` (a Microsoft Entra ID token), with `ANTHROPIC_FOUNDRY_RESOURCE` (the resource's name) or `ANTHROPIC_FOUNDRY_BASE_URL` (its Claude endpoint, `https://<resource>.services.ai.azure.com/anthropic/`) | The `claude-opus-5-5` deployment at low effort, through Anthropic's Messages API, without the refusal fallback, which Foundry doesn't offer |
 | `bedrock` | `AWS_BEARER_TOKEN_BEDROCK` (a Bedrock API key), or IAM credentials in `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`, which sign each request | `global.amazon.nova-2-lite-v1:0`: Amazon Nova 2 Lite with its reasoning off, through the Converse API |
+| `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` (which wins when both are set, as in Google's own libraries), and `GOOGLE_GEMINI_BASE_URL` for a gateway | `gemini-3.8-flash` at its low thinking level, through generateContent |
 | `openai` | `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for Azure OpenAI, Ollama, LM Studio, Groq or another server that speaks Chat Completions (a local one needs no key) | `gpt-6-sol` with reasoning off, through Chat Completions |
 
-- Without `--provider`, the simulator uses the first of these it has credentials for, in that order, and its startup line and the page say which.
-- `--model` picks another model from the same provider: any Bedrock model that uses tools through Converse (Claude, Llama, Mistral and others, by model id, inference profile or ARN), or any model a Chat Completions server has. `--region` picks Bedrock's Region; otherwise it's `AWS_REGION`, `AWS_DEFAULT_REGION` or `us-east-1`.
-- Credentials come from the environment only, not from `~/.aws`. `aws configure export-credentials --format env` (or `--format powershell`) prints a profile's as variables to set.
+- Without `--provider`, the simulator uses the first of these it has credentials for, in the table's order, and its startup line and the page say which. Claude comes first, through Anthropic and then through Foundry, then Bedrock (Amazon Nova): the families Alexa+ itself runs on. Gemini and OpenAI follow, OpenAI last because its base URL alone, for a local server, is the loosest sign that it's wanted.
+- `--model` picks another model from the same provider: any Bedrock model that uses tools through Converse (Claude, Llama, Mistral and others, by model id, inference profile or ARN), any Gemini model with function calling (`gemini-3.5-flash-lite` is the fastest), or any model a Chat Completions server has. `--region` picks Bedrock's Region; otherwise it's `AWS_REGION`, `AWS_DEFAULT_REGION` or `us-east-1`.
+- On Microsoft Foundry, `--model` is a deployment's name. A Claude deployment (one with "claude" in its name) goes to the resource's Anthropic endpoint, and any other (GPT, DeepSeek, Llama, Mistral, Grok and more) to its OpenAI-compatible `/openai/v1` endpoint, with the same key. For a name that doesn't say, `--foundry-api anthropic` or `--foundry-api openai` decides. An Entra ID token comes from `az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv` and lasts about an hour.
+- Credentials come from the environment only, not from `~/.aws` or Azure's or Google Cloud's sign-in. `aws configure export-credentials --format env` (or `--format powershell`) prints an AWS profile's as variables to set. Gemini on Vertex AI, which needs Google Cloud sign-in, isn't one of the providers; a gateway in front of it can stand in through `GOOGLE_GEMINI_BASE_URL`.
 - OpenAI's flagship, GPT-6 Astra, and GPT-6.1 Sol call tools only through OpenAI's Responses API, so they can't stand in here yet; GPT-6 Sol calls them through Chat Completions with its reasoning off.
-- Bedrock and OpenAI were tested against recorded API responses, in the shapes each provider documents, not live calls, since no credentials were available.
+- Gemini's replies carry thought signatures that Gemini needs back with the conversation; the page passes them along with the rest of the reply.
+- Microsoft Foundry, Bedrock, Gemini and OpenAI were tested against recorded API responses, in the shapes each provider documents, not live calls, since no credentials were available.
 
 ## The readiness rules
 
