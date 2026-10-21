@@ -33,7 +33,7 @@ const sim = await startSimulator({
 });
 ```
 
-The package ships the page as one ES module with what it needs bundled in, so any bundler (or none, with an import map) works.
+The package ships the page as one ES module with what it needs bundled in, so any bundler (or none, with an import map) works. Its types cover the stylesheet's import too, so a TypeScript project that checks side-effect imports (TypeScript 6 and later do by default) needs no types of its own for it.
 
 | Option | |
 |---|---|

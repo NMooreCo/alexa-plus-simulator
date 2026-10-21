@@ -25,7 +25,10 @@
       "types": "./dist/lib/types/ui/simulator.d.ts",
       "default": "./dist/lib/simulator.js"
     },
-    "./ui/style.css": "./dist/lib/style.css",
+    "./ui/style.css": {
+      "types": "./dist/lib/style.css.d.ts",
+      "default": "./dist/lib/style.css"
+    },
     "./package.json": "./package.json"
   },
   "files": [
