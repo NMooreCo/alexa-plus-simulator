@@ -77,7 +77,7 @@ A model's credentials in the environment turn on talking: `ANTHROPIC_API_KEY` (a
 
 ## Models
 
-A model stands in for Alexa+'s own: it reads the conversation, decides what to say and which of your tools to call, and the page makes the calls. Any of five providers can be that model, each through its own API; the page works the same with all of them.
+A model stands in for Alexa+'s own: it reads the conversation, decides what to say and which of your tools to call, and the page makes the calls. Any of five providers can be that model, each through its own API, and the page is the same whichever one it is. Only Anthropic's has been tried live so far; the last note below says how the others were tested.
 
 | `--provider` | Credentials | Default model |
 |---|---|---|
@@ -85,15 +85,15 @@ A model stands in for Alexa+'s own: it reads the conversation, decides what to s
 | `foundry` | `ANTHROPIC_FOUNDRY_API_KEY` (the resource's key) or `AZURE_OPENAI_AUTH_TOKEN` (a Microsoft Entra ID token), with `ANTHROPIC_FOUNDRY_RESOURCE` (the resource's name) or `ANTHROPIC_FOUNDRY_BASE_URL` (its Claude endpoint, `https://<resource>.services.ai.azure.com/anthropic/`) | The `claude-opus-5-5` deployment at low effort, through Anthropic's Messages API, without the refusal fallback, which Foundry doesn't offer |
 | `bedrock` | `AWS_BEARER_TOKEN_BEDROCK` (a Bedrock API key), or IAM credentials in `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`, which sign each request | `global.amazon.nova-2-lite-v1:0`: Amazon Nova 2 Lite with its reasoning off, through the Converse API |
 | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` (which wins when both are set, as in Google's own libraries), and `GOOGLE_GEMINI_BASE_URL` for a gateway | `gemini-3.8-flash` at its low thinking level, through generateContent |
-| `openai` | `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for Azure OpenAI, Ollama, LM Studio, Groq or another server that speaks Chat Completions (a local one needs no key) | `gpt-6-sol` with reasoning off, through Chat Completions |
+| `openai` | `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for another server that speaks Chat Completions, such as Azure OpenAI or a model server on your own machine (none tried yet) | `gpt-6-sol` with reasoning off, through Chat Completions |
 
 - Without `--provider`, the simulator uses the first of these it has credentials for, in the table's order, and its startup line and the page say which. Claude comes first, through Anthropic and then through Foundry, then Bedrock (Amazon Nova): the families Alexa+ itself runs on. Gemini and OpenAI follow, OpenAI last because its base URL alone, for a local server, is the loosest sign that it's wanted.
-- `--model` picks another model from the same provider: any Bedrock model that uses tools through Converse (Claude, Llama, Mistral and others, by model id, inference profile or ARN), any Gemini model with function calling (`gemini-3.5-flash-lite` is the fastest), or any model a Chat Completions server has. `--region` picks Bedrock's Region; otherwise it's `AWS_REGION`, `AWS_DEFAULT_REGION` or `us-east-1`.
-- On Microsoft Foundry, `--model` is a deployment's name. A Claude deployment (one with "claude" in its name) goes to the resource's Anthropic endpoint, and any other (GPT, DeepSeek, Llama, Mistral, Grok and more) to its OpenAI-compatible `/openai/v1` endpoint, with the same key. For a name that doesn't say, `--foundry-api anthropic` or `--foundry-api openai` decides. An Entra ID token comes from `az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv` and lasts about an hour.
+- `--model` picks another model from the same provider: any Bedrock model that uses tools through Converse (Claude, Llama, Mistral and others, by model id, inference profile or ARN), any Gemini model with function calling, or any model a Chat Completions server has. `--region` picks Bedrock's Region; otherwise it's `AWS_REGION`, `AWS_DEFAULT_REGION` or `us-east-1`.
+- On Microsoft Foundry, `--model` is a deployment's name. A Claude deployment (one with "claude" in its name) goes to the resource's Anthropic endpoint, and any other (GPT, DeepSeek, Llama, Mistral, Grok and more) to its OpenAI-compatible `/openai/v1` endpoint, with the same key. For a name that doesn't say, `--foundry-api anthropic` or `--foundry-api openai` decides. An Entra ID token works in place of the key (Microsoft's Foundry documentation shows how to get one with the Azure CLI); it lasts about an hour, so set a new one when it runs out.
 - Credentials come from the environment only, not from `~/.aws` or Azure's or Google Cloud's sign-in. `aws configure export-credentials --format env` (or `--format powershell`) prints an AWS profile's as variables to set. Gemini on Vertex AI, which needs Google Cloud sign-in, isn't one of the providers; a gateway in front of it can stand in through `GOOGLE_GEMINI_BASE_URL`.
-- OpenAI's flagship, GPT-6 Astra, and GPT-6.1 Sol call tools only through OpenAI's Responses API, so they can't stand in here yet; GPT-6 Sol calls them through Chat Completions with its reasoning off.
+- A model that calls tools only through OpenAI's Responses API can't stand in here yet, since this speaks Chat Completions; the default, `gpt-6-sol`, calls them there with its reasoning off.
 - Gemini's replies carry thought signatures that Gemini needs back with the conversation; the page passes them along with the rest of the reply.
-- Microsoft Foundry, Bedrock, Gemini and OpenAI were tested against recorded API responses, in the shapes each provider documents, not live calls, since no credentials were available.
+- Microsoft Foundry, Bedrock, Gemini and OpenAI were tested against recorded API responses, in the shapes each provider documents, not live calls, since no credentials were available. If one of them misbehaves for you, please open an issue with the Traffic tab's exchange.
 
 ## The readiness rules
 
@@ -185,7 +185,7 @@ Both ports listen on 127.0.0.1 only, refuse other hosts (against DNS rebinding) 
 - **The voice is your browser's.** Recognition and speech come from the Web Speech API.
 - **Amazon's full rubric isn't public.** The check covers what Amazon has published (quoted, with links, in [docs/alexa-requirements.md](docs/alexa-requirements.md)) and says so in every report. The verdicts are READY, CONDITIONAL and NOT_READY, so they can't be mistaken for Amazon's certification. Amazon's inspector also judges visual, accessibility and UI quality rules it hasn't published; the screen check covers rendering, fit, declared loads and errors only.
 - **It hasn't been compared with Amazon's own tools,** which are partner-only. It follows their documentation; if you have access to both and they disagree, please open an issue.
-- **Sign-in runs on your machine.** `link` follows the account-linking flow the guide describes, but the sign-in comes back to `http://127.0.0.1` rather than Alexa's redirect URIs, with a client you made for testing (or one it registered), so it can't show how Amazon's own servers get on with your authorization server.
+- **Sign-in runs on your machine.** `link` follows the account-linking flow the guide describes, but the sign-in comes back to `http://127.0.0.1` rather than Alexa's redirect URIs, with a client you made for testing (or one it registered), so it can't show how Amazon's own servers get on with your authorization server. It has been tested against a stand-in authorization server, not yet a production one.
 - **Screens render in your browser's engine** at the documented sizes, not on Echo hardware.
 
 ## Try it without a server

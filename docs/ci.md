@@ -53,7 +53,7 @@ jobs:
             readiness-screenshots/
 ```
 
-`--visual` needs a browser: GitHub's Ubuntu, Windows and macOS runners have Chrome, which it finds on its own. Elsewhere, install Chrome or Edge, or run `npx playwright install --with-deps chromium` first.
+`--visual` needs a browser. GitHub's hosted Ubuntu, Windows and macOS images list Chrome among their installed software, and the check finds it on its own. Elsewhere, or if a runner image changes, install Chrome or Edge, or run `npx playwright install --with-deps chromium` first.
 
 A server that needs sign-in takes a token from the `MCP_TOKEN` environment variable (a repository secret, say), so it never appears in the command. (`link` signs in through a browser, so it's for your machine, not CI.)
 
