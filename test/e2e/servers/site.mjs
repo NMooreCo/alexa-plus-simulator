@@ -10,6 +10,9 @@
 //   /undeclared.html  The library on /undeclared/mcp, a small MCP server of this
 //                     site's whose screen loads an image from an origin it
 //                     doesn't declare in _meta.ui.csp.
+//   /hung-model.html  The library on /mcp with /hung/model as its model route,
+//                     which takes each turn and never answers, and a one-second
+//                     wait for it.
 //   /lib/...          The built library and its stylesheet.
 //   /picture.png      The image that screen loads.
 import { readFile } from "node:fs/promises";
@@ -55,6 +58,7 @@ function hostPage(title, options) {
 const PAGES = {
   "/hosted.html": hostPage("Hosted simulator", { mcpUrl: "/mcp", modelUrl: null, check: "browser" }),
   "/undeclared.html": hostPage("Undeclared screen", { mcpUrl: "/undeclared/mcp", modelUrl: null, check: false }),
+  "/hung-model.html": hostPage("Hung model", { mcpUrl: "/mcp", modelUrl: "/hung/model", modelTimeoutMs: 1000, check: false }),
 };
 
 const PICTURE_SCREEN = "ui://picture/screen";
@@ -150,6 +154,8 @@ async function handle(request, response) {
   const path = new URL(request.url ?? "/", origin).pathname;
   if (path === "/mcp") return forward(request, response);
   if (path === "/undeclared/mcp") return serveMcp(pictures, request, response);
+  // Takes the turn and never answers, as a provider that hangs would leave a route; the page has to give up on its own.
+  if (path === "/hung/model") return;
   if (Object.hasOwn(PAGES, path)) return send(response, 200, "text/html; charset=utf-8", PAGES[path]);
   if (path === "/picture.png") return send(response, 200, "image/png", PICTURE);
   if (path.startsWith("/lib/")) return serveLib(path, response);

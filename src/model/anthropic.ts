@@ -39,19 +39,23 @@ export function claudeProvider(client: ClaudeClient, route: ClaudeRoute): Provid
   return {
     label: route.label,
     summary: route.summary,
-    async turn(turn) {
+    async turn(turn, signal) {
       try {
-        return await client.beta.messages.create({
-          model: route.model,
-          max_tokens: 16000,
-          // Spoken replies: low effort keeps an answer quick.
-          output_config: { effort: "low" },
-          // A declined request is run again on Anthropic's recommended model for its kind of refusal.
-          ...(route.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
-          system: systemBlocks(turn.context),
-          tools: turn.tools as Anthropic.Beta.BetaTool[],
-          messages: turn.messages as Anthropic.Beta.BetaMessageParam[],
-        });
+        return await client.beta.messages.create(
+          {
+            model: route.model,
+            max_tokens: 16000,
+            // Spoken replies: low effort keeps an answer quick.
+            output_config: { effort: "low" },
+            // A declined request is run again on Anthropic's recommended model for its kind of refusal.
+            ...(route.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+            system: systemBlocks(turn.context),
+            tools: turn.tools as Anthropic.Beta.BetaTool[],
+            messages: turn.messages as Anthropic.Beta.BetaMessageParam[],
+          },
+          // So the request stops when the page stops waiting or the route's time runs out.
+          { signal },
+        );
       } catch (err) {
         if (err instanceof Anthropic.APIError) throw route.failure(err);
         throw err;

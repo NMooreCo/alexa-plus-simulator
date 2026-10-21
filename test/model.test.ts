@@ -123,6 +123,28 @@ describe("the model route", () => {
     expect(await (await ask(apiError(400, "invalid_request_error"))).json()).toMatchObject({ error: { code: "bad_request" } });
     expect(await (await ask(apiError(529, "overloaded_error"))).json()).toMatchObject({ error: { code: "model_error" } });
   });
+
+  it.each([
+    ["Anthropic", { anthropic: { apiKey: "key" } }],
+    ["Gemini", { gemini: { apiKey: "key" } }],
+    ["OpenAI", { openai: { apiKey: "key" } }],
+  ] as const)("gives up on a turn %s doesn't answer in time, says so, and stops the request", async (_, credentials) => {
+    let stopped = false;
+    // A provider that takes the request and never answers, until it's told to stop.
+    const hung = (_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          stopped = true;
+          reject(init.signal!.reason);
+        });
+      });
+    const started = Date.now();
+    const res = await modelRoute({ ...credentials, fetch: hung, turnTimeoutMs: 100, retryDelayMs: 0 })(turn({ messages: [{ role: "user", content: "hi" }], tools: [] }));
+    expect(res.status).toBe(504);
+    expect(await res.json()).toEqual({ error: { code: "timeout", message: "The model didn't answer within 1 second. Try again." } });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(stopped).toBe(true);
+  });
 });
 
 describe("choosing the model", () => {

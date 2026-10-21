@@ -5,7 +5,7 @@ import type { ModelTurnRequest } from "../shared/contract.ts";
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 /** The route's error codes, each of which the page knows how to explain. */
-export type FailureCode = "no_key" | "model_key" | "rate_limited" | "bad_request" | "model_error";
+export type FailureCode = "no_key" | "model_key" | "rate_limited" | "bad_request" | "model_error" | "timeout";
 
 /** A failure the page can explain: the route answers with this status, code and message. */
 export class TurnError extends Error {

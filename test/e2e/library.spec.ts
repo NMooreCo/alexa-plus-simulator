@@ -24,6 +24,22 @@ test("hosted in a page of its own, the library records its own traffic and runs 
   await expect(page.locator(".verdict .meta")).toHaveText(/^\d+ passed, 0 warnings, 0 failed, \d+ skipped$/);
 });
 
+test("says so when the model route doesn't answer in time, and can be asked again", async ({ page }) => {
+  await page.goto(`${SITE}/hung-model.html`);
+  await expect(page.getByRole("status")).toHaveText(/^Connected to tasks-example/);
+  await page.getByLabel("What you'd say").fill("What's on my list?");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+
+  const said = page.locator("#talk-log > li").first();
+  await expect(said.locator(".who")).toHaveText("alexa");
+  await expect(said.locator(".what")).toHaveText("The assistant didn't answer within 1 second. Try again.");
+  await expect(page.locator("#said")).toHaveText("The assistant didn't answer within 1 second. Try again.");
+  // The turn is over: the next question is taken, rather than dropped as if one were still going.
+  await page.getByLabel("What you'd say").fill("Anything new?");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.locator("#talk-log > li").filter({ hasText: "Anything new?" })).toHaveCount(1);
+});
+
 test.describe("a screen that loads something it didn't declare", () => {
   // The browser logs what the screen's policy blocked too, worded differently from one version to the next.
   test.use({ consoleErrors: [/Content Security Policy directive: "img-src /] });

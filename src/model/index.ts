@@ -51,7 +51,16 @@ export interface ModelOptions {
   fetch?: FetchLike;
   /** For tests: the pause before a provider is tried again after being busy or out of reach (a second otherwise; Anthropic's SDK keeps its own). */
   retryDelayMs?: number;
+  /** How long one turn may take, its one retry included; TURN_TIMEOUT_MS unless set. */
+  turnTimeoutMs?: number;
 }
+
+/**
+ * How long one model turn may take before the route gives up on it: plenty
+ * for a spoken answer, even with a retry, but a provider that hangs leaves the
+ * person waiting a minute, not until a socket times out.
+ */
+export const TURN_TIMEOUT_MS = 60_000;
 
 export interface ModelSetup {
   /** Who answers, or null when none has credentials (so talking is off). */
@@ -140,11 +149,11 @@ export function setUpModel(options: ModelOptions = {}): ModelSetup {
     const needs = options.provider ? `${NEEDS[options.provider]} for ${NAMES[options.provider]}` : ANY;
     // The page adds that the Tools tab works without a model, so this says only what to set.
     const message = `Set ${needs} to talk to the simulator.`;
-    return { provider: null, model: null, label: null, summary: `none: set ${needs} to talk (the Tools tab works without one)`, route: route(null, message) };
+    return { provider: null, model: null, label: null, summary: `none: set ${needs} to talk (the Tools tab works without one)`, route: route(null, message, 0) };
   }
   const model = options.model?.trim() || DEFAULT_MODELS[name];
   const provider = createProvider(name, model, options);
-  return { provider: name, model, label: provider.label, summary: provider.summary, route: route(provider, "") };
+  return { provider: name, model, label: provider.label, summary: provider.summary, route: route(provider, "", options.turnTimeoutMs ?? TURN_TIMEOUT_MS) };
 }
 
 function createProvider(name: ProviderName, model: string, options: ModelOptions): Provider {
@@ -188,18 +197,33 @@ function failure(status: number, code: string, message: string): Response {
   return Response.json({ error: { code, message } }, { status });
 }
 
-function route(provider: Provider | null, noKey: string): Route {
+/** Rejects once the signal aborts, so a provider that doesn't hear it still can't hold the turn past its time. */
+function aborted(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+}
+
+function route(provider: Provider | null, noKey: string, timeoutMs: number): Route {
   return async (request) => {
     if (request.method !== "POST") return failure(405, "method", "POST a turn here.");
     if (!provider) return failure(503, "no_key", noKey);
     const turn = readTurn(await request.text());
     if (typeof turn === "string") return failure(400, "bad_request", turn);
+    // The provider stops when the page stops waiting, or when the turn has taken too long.
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = AbortSignal.any([request.signal, timeout]);
     try {
-      const message = await provider.turn(turn, request.signal);
+      const message = await Promise.race([provider.turn(turn, signal), aborted(signal)]);
       return Response.json(message, { headers: { "x-model": message.model } });
     } catch (err) {
+      if (timeout.aborted) return failure(504, "timeout", `The model didn't answer within ${duration(timeoutMs)}. Try again.`);
       if (err instanceof TurnError) return failure(err.status, err.code, err.message);
       throw err;
     }
   };
+}
+
+/** "60 seconds", or "1 second", for a message that's spoken. */
+function duration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  return `${seconds} second${seconds === 1 ? "" : "s"}`;
 }

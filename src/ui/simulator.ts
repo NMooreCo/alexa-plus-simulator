@@ -627,23 +627,39 @@ export async function startSimulator(options: SimulatorOptions): Promise<Simulat
   async function callModel(): Promise<Reply> {
     if (!options.modelUrl) throw new ModelError({ status: 503, code: "no_model", message: "Talking is off here." });
     const started = performance.now();
-    const res = await fetch(options.modelUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headersFor("model") },
-      body: JSON.stringify({
-        messages: state.messages,
-        tools: modelTools,
-        context: {
-          instructions,
-          timeZone: timeZone(),
-          now: now().toLocaleString("en-US", { timeZone: timeZone(), dateStyle: "full", timeStyle: "short" }),
-          device: device.name,
-          screen: device.surface !== "none",
-          ...Object.assign({}, ...hooks.map((h) => h.modelContext?.() ?? {})),
-        },
-      }),
-    });
-    const body = (await res.json().catch(() => ({}))) as Reply & { error?: { code?: string; message?: string } };
+    // Longer than the CLI's route waits for its provider (60 seconds), so that route's own answer, which says what happened, comes first.
+    const waitMs = options.modelTimeoutMs ?? 75_000;
+    let res: Response;
+    let body: Reply & { error?: { code?: string; message?: string } };
+    try {
+      res = await fetch(options.modelUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headersFor("model") },
+        body: JSON.stringify({
+          messages: state.messages,
+          tools: modelTools,
+          context: {
+            instructions,
+            timeZone: timeZone(),
+            now: now().toLocaleString("en-US", { timeZone: timeZone(), dateStyle: "full", timeStyle: "short" }),
+            device: device.name,
+            screen: device.surface !== "none",
+            ...Object.assign({}, ...hooks.map((h) => h.modelContext?.() ?? {})),
+          },
+        }),
+        signal: AbortSignal.timeout(waitMs),
+      });
+      body = (await res.json().catch((err: unknown) => {
+        if (err instanceof Error && err.name === "TimeoutError") throw err;
+        return {};
+      })) as typeof body;
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        const seconds = Math.max(1, Math.round(waitMs / 1000));
+        throw new ModelError({ status: 504, code: "timeout", message: `The assistant didn't answer within ${seconds} second${seconds === 1 ? "" : "s"}. Try again.` });
+      }
+      throw err;
+    }
     if (!res.ok) throw new ModelError({ status: res.status, code: body.error?.code, message: body.error?.message ?? "The assistant didn't answer." });
     const ms = Math.round(performance.now() - started);
     const u = body.usage;

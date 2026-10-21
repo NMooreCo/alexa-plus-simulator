@@ -161,6 +161,8 @@ export interface SimulatorOptions {
   serverUrl?: string;
   /** The model route, taking and answering the simulator's /api/model shape; null leaves talking off. */
   modelUrl?: string | null;
+  /** How long to wait for the model route's answer to one turn before saying it didn't come; 75 seconds by default. */
+  modelTimeoutMs?: number;
   /** What the page calls the model, like "Claude (claude-opus-5-5)". */
   modelLabel?: string;
   /** The simulator's local proxy: its /events feed the traffic log. Without one, the page records its own requests. */

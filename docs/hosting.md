@@ -41,6 +41,7 @@ The package ships the page as one ES module with what it needs bundled in, so an
 | `mcpUrl` | Your MCP endpoint |
 | `modelUrl` | Your model route (below); `null` leaves talking off |
 | `modelLabel` | What the page calls the model |
+| `modelTimeoutMs` | How long the page waits for your model route to answer a turn before saying it didn't; 75 seconds by default |
 | `check` | `"browser"` for a Readiness tab that checks `mcpUrl` from the visitor's browser, a URL for a route that runs it, or `false` for none |
 | `device`, `devices` | The device to start on, and which ones to offer, by id (`show-5`, `show-8`, `show-10`, `show-15`, `show-21`, `dot`) |
 | `home` | A tool whose screen is up from the start |
@@ -76,7 +77,7 @@ The page sends each turn as a POST of JSON in the Claude Messages API's shape, a
 
 Pass reply blocks back exactly as they came, extra fields included: a Gemini reply's blocks carry a `thought_signature` that Gemini requires on the next turn (the page does this already, and so does any route built like the simulator's).
 
-On failure, answer with an HTTP error and `{ "error": { "code": "...", "message": "..." } }`. The page explains `no_key` itself, and an extension's `modelFailed` hook can handle codes of your own (a demo passcode, say).
+On failure, answer with an HTTP error and `{ "error": { "code": "...", "message": "..." } }`. The page explains `no_key` itself, and an extension's `modelFailed` hook can handle codes of your own (a demo passcode, say). Answer within `modelTimeoutMs`, too: past it, the page stops waiting and says the assistant didn't answer. The CLI's own route gives its provider 60 seconds a turn, then answers 504 with the code `timeout`, so its words arrive before the page's 75 seconds are up.
 
 The route is where your model key lives, so keep it on your server, and think about who can reach it: a public demo should limit how often it answers and may want a passcode, since every turn costs money.
 
