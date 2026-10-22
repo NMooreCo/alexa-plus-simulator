@@ -310,7 +310,8 @@ describe("signing in from the command line", () => {
   afterAll(() => auth.close());
 
   it("links, then checks and simulates with the token file", async () => {
-    const file = join(await mkdtemp(join(tmpdir(), "alexa-sim-")), ".alexa-plus-simulator", "tokens.json");
+    // A ~ inside the path, as in Windows' short folder names (RUNNER~1), needs no quotes in the commands it prints.
+    const file = join(await mkdtemp(join(tmpdir(), "alexa-sim~1-")), ".alexa-plus-simulator", "tokens.json");
     // The fake plays the browser, so no real one opens.
     const linking = capture({}, (url) => auth.browse(url));
     expect(await main(["link", auth.mcpUrl, "--callback-port", "0", "--token-file", file], linking.io)).toBe(0);

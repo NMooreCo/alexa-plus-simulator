@@ -193,7 +193,8 @@ function summarize(out: (line: string) => void, file: string, tokens: SavedToken
   if (!tokens.refreshToken) {
     out(`Warning: the token endpoint returned no refresh token, so this sign-in ends when the access token does. Amazon's account linking guide: ${quoted(SOURCES.refreshTokens)}`);
   }
-  const arg = /^[\w./:@\\-]+$/.test(file) ? file : `"${file}"`;
+  // Quoted only when a shell needs it: a ~ inside a path (Windows' short names, like RUNNER~1) is fine, one at the start isn't.
+  const arg = /^[\w./:@\\-][\w./:@\\~-]*$/.test(file) ? file : `"${file}"`;
   out("Next:");
   out(`  alexa-plus-simulator check ${tokens.mcpUrl} --token-file ${arg}`);
   out(`  alexa-plus-simulator ${tokens.mcpUrl} --token-file ${arg}`);
